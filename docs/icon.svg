@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Morning Gym Coach</title>
+  <rect width="512" height="512" rx="96" fill="#101418"/>
+  <circle cx="382" cy="116" r="52" fill="#f3c969"/>
+  <path d="M96 330c45-72 90-108 136-108 34 0 58 16 82 49 18 25 36 37 55 37 22 0 43-14 63-42v101c-24 18-47 27-70 27-38 0-68-17-91-52-18-27-36-41-54-41-27 0-57 24-91 72H96z" fill="#49d3b4"/>
+  <path d="M112 172h54v170h-54zM346 172h54v170h-54zM174 237h164v40H174z" fill="#f3f6f8"/>
+</svg>

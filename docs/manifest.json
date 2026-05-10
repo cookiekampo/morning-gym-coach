@@ -1,0 +1,19 @@
+{
+  "name": "Morning Gym Coach",
+  "short_name": "Gym Coach",
+  "description": "朝ジムの脚トレーニングを30〜45分で集中して行う個人用PWA",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101418",
+  "theme_color": "#101418",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

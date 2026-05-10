@@ -1,7 +1,7 @@
 {
   "name": "Morning Gym Coach",
   "short_name": "Gym Coach",
-  "description": "朝ジムの脚トレーニングを30〜45分で集中して行う個人用PWA v0.2",
+  "description": "朝ジムの脚トレーニングを30〜45分で集中して行う個人用PWA v0.3",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

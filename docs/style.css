@@ -308,6 +308,18 @@ h3 {
   gap: 10px;
 }
 
+.reorder-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.reorder-actions .button {
+  min-height: 44px;
+  font-size: 0.9rem;
+}
+
 .compact-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -409,6 +421,11 @@ h3 {
   font-weight: 900;
 }
 
+.order-summary p {
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
 .judge {
   margin: 10px 0 0;
   color: var(--accent-2);
@@ -434,6 +451,10 @@ h3 {
   }
 
   .settings-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .reorder-actions {
     grid-template-columns: 1fr;
   }
 }

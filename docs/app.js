@@ -4,6 +4,7 @@
   const STORAGE_SESSIONS_KEY = "morning-gym-coach:v0.1:sessions";
   const STORAGE_ACTIVE_KEY = "morning-gym-coach:v0.1:activeSession";
   const RIR_ZERO_WARNING = "この種目でRIR0は非推奨です。フォームが崩れていない場合のみ記録してください。";
+  const LEG_EXTENSION_ALLOUT_WARNING = "まだ後続種目があります。ここでオールアウトすると後の種目に影響します。記録しますか？";
 
   const EXERCISES = {
     squat: {
@@ -39,7 +40,7 @@
   };
 
   const SESSION_PLAN = {
-    id: "legs-45-v0.2",
+    id: "legs-45-v0.3",
     name: "脚",
     durationMinutes: 45,
     plannedExercises: [
@@ -95,9 +96,12 @@
     restFinished: false,
     restNotified: false,
     coachNote: "",
+    menuReorderMode: false,
+    menuOrder: [],
   };
 
   document.addEventListener("DOMContentLoaded", () => {
+    state.menuOrder = defaultOrder();
     state.session = loadActiveSession();
     render();
   });
@@ -138,12 +142,16 @@
   function renderMenu() {
     const activeSession = loadActiveSession();
     const latestSession = getLatestSession();
-    const cards = SESSION_PLAN.plannedExercises.map((planned) => {
+    if (!state.menuOrder.length) {
+      state.menuOrder = defaultOrder();
+    }
+    const cards = state.menuOrder.map((exerciseId, index) => {
+      const planned = plannedById(exerciseId, SESSION_PLAN.plannedExercises);
       const exercise = EXERCISES[planned.exerciseId];
       return `
         <article class="exercise-card">
           <div class="exercise-title">
-            <strong>${exercise.name}</strong>
+            <strong>${index + 1}. ${exercise.name}</strong>
             <span class="tag">${planned.sets}セット</span>
           </div>
           <dl class="facts">
@@ -153,6 +161,12 @@
             <div><dt>休憩</dt><dd>${planned.restSeconds}秒</dd></div>
           </dl>
           <p class="helper-text">${menuSafetyText(planned, exercise)}</p>
+          ${state.menuReorderMode ? `
+            <div class="reorder-actions">
+              <button class="button ghost" type="button" data-move-up="${exercise.id}" ${index === 0 ? "disabled" : ""}>上へ</button>
+              <button class="button ghost" type="button" data-move-down="${exercise.id}" ${index === state.menuOrder.length - 1 ? "disabled" : ""}>下へ</button>
+            </div>
+          ` : ""}
         </article>
       `;
     }).join("");
@@ -161,7 +175,7 @@
       <section class="screen">
         <header class="screen-header">
           <div>
-            <p class="eyebrow">Morning Gym Coach v0.2</p>
+            <p class="eyebrow">Morning Gym Coach v0.3</p>
             <h1>脚 / 45分</h1>
           </div>
         </header>
@@ -169,7 +183,8 @@
         ${renderSettingsPanel()}
         <div class="action-row">
           ${activeSession ? '<button class="button" id="continue-session" type="button">続きから</button>' : ""}
-          <button class="button primary" id="start-session" type="button">トレーニング開始</button>
+          <button class="button ghost" id="toggle-reorder" type="button">${state.menuReorderMode ? "順番変更を閉じる" : "順番を変更"}</button>
+          <button class="button primary" id="start-session" type="button">${state.menuReorderMode ? "この順番で開始" : "トレーニング開始"}</button>
           ${latestSession ? '<button class="button ghost" id="latest-summary" type="button">直近まとめ</button>' : ""}
         </div>
       </section>
@@ -179,10 +194,22 @@
       if (activeSession && !window.confirm("進行中の記録を終了して、新しく開始しますか？")) {
         return;
       }
-      state.session = createSession();
+      state.session = createSession(state.menuOrder);
       saveSession(state.session);
       resetDraft();
       setView("input");
+    });
+
+    document.getElementById("toggle-reorder").addEventListener("click", () => {
+      state.menuReorderMode = !state.menuReorderMode;
+      renderMenu();
+    });
+
+    document.querySelectorAll("[data-move-up]").forEach((button) => {
+      button.addEventListener("click", () => moveMenuExercise(button.dataset.moveUp, -1));
+    });
+    document.querySelectorAll("[data-move-down]").forEach((button) => {
+      button.addEventListener("click", () => moveMenuExercise(button.dataset.moveDown, 1));
     });
 
     const continueButton = document.getElementById("continue-session");
@@ -270,6 +297,8 @@
 
         <div class="action-row">
           <button class="button primary" id="record-set" type="button">記録して休憩</button>
+          <button class="button ghost" id="defer-exercise" type="button">この種目を後回し</button>
+          <button class="button warning" id="skip-exercise" type="button">今日はこの種目をスキップ</button>
           <button class="button danger" id="pain-button" type="button">痛みあり</button>
         </div>
       </section>
@@ -288,6 +317,8 @@
       });
     });
     document.getElementById("record-set").addEventListener("click", recordSet);
+    document.getElementById("defer-exercise").addEventListener("click", deferCurrentExercise);
+    document.getElementById("skip-exercise").addEventListener("click", skipCurrentExercise);
     document.getElementById("pain-button").addEventListener("click", handlePain);
 
     const editButton = document.getElementById("edit-last-set");
@@ -421,17 +452,22 @@
     }
 
     const session = state.session;
+    normalizeLoadedSession(session);
+    const orderSummary = renderOrderSummary(session);
     const cards = session.plannedSession.plannedExercises.map((planned) => {
       const exercise = EXERCISES[planned.exerciseId];
       const sets = session.performedSets.filter((set) => set.exerciseId === planned.exerciseId);
+      const status = session.exerciseStatuses[planned.exerciseId] || "pending";
       const plannedRows = Array.from({ length: planned.sets }, (_, index) => {
         const setNumber = index + 1;
         return `<li>${setNumber}. ${formatWeight(planned.plannedWeightKg, exercise.loadType)} / ${formatRepRange(planned, exercise)} / RIR${targetRirFor(planned, setNumber)}</li>`;
       }).join("");
-      const actualRows = sets.length
+      const actualRows = status === "skipped"
+        ? '<li class="muted">スキップ</li>'
+        : sets.length
         ? sets.map((set) => `<li>${formatPerformedSet(set, exercise)}</li>`).join("")
         : '<li class="muted">記録なし</li>';
-      const notes = summaryNotes(planned, exercise, sets);
+      const notes = summaryNotes(planned, exercise, sets, status);
 
       return `
         <section class="summary-card">
@@ -454,6 +490,7 @@
             <h1>トレ後まとめ</h1>
           </div>
         </header>
+        ${orderSummary}
         <div class="stack">${cards}</div>
         ${renderSettingsPanel()}
         <div class="action-row">
@@ -550,6 +587,10 @@
       return;
     }
 
+    if (rir === "0" && planned.exerciseId === "leg_extension" && hasFollowingUnfinishedExercise(planned.exerciseId) && !window.confirm(LEG_EXTENSION_ALLOUT_WARNING)) {
+      return;
+    }
+
     const performedSet = {
       sessionId: session.id,
       exerciseId: planned.exerciseId,
@@ -567,6 +608,8 @@
     };
 
     session.performedSets.push(performedSet);
+    markExerciseStarted(planned.exerciseId);
+    updateExerciseStatusAfterSet(planned.exerciseId, rir);
     state.coachNote = rir === "0" ? "この種目は終了推奨。" : rirJudgment(rir);
 
     const nextTarget = nextTargetAfter(session.currentExerciseIndex, session.currentSetNumber, rir);
@@ -606,6 +649,8 @@
       note: "痛みあり。種目終了。",
     });
     session.allOutBanned = true;
+    markExerciseStarted(planned.exerciseId);
+    session.exerciseStatuses[planned.exerciseId] = "completed";
     state.coachNote = "痛みあり。今日はRIR0なし。";
 
     const nextTarget = firstSetOfNextExercise(session.currentExerciseIndex);
@@ -625,10 +670,10 @@
       return;
     }
 
-    const exerciseIndex = state.session.plannedSession.plannedExercises.findIndex((planned) => planned.exerciseId === set.exerciseId);
+    rebuildSessionProgress();
+    const exerciseIndex = state.session.activeOrder.indexOf(set.exerciseId);
     state.session.currentExerciseIndex = Math.max(0, exerciseIndex);
     state.session.currentSetNumber = set.setNumber;
-    recalculateAllOutBan();
     saveSession(state.session);
 
     const planned = currentPlanned();
@@ -652,10 +697,10 @@
       return;
     }
 
-    const exerciseIndex = state.session.plannedSession.plannedExercises.findIndex((planned) => planned.exerciseId === set.exerciseId);
+    rebuildSessionProgress();
+    const exerciseIndex = state.session.activeOrder.indexOf(set.exerciseId);
     state.session.currentExerciseIndex = Math.max(0, exerciseIndex);
     state.session.currentSetNumber = set.setNumber;
-    recalculateAllOutBan();
     saveSession(state.session);
     resetDraft();
     setView("input");
@@ -675,6 +720,64 @@
     state.restNotified = false;
     resetDraft();
     setView("menu");
+  }
+
+  function deferCurrentExercise() {
+    const session = state.session;
+    const planned = currentPlanned();
+    if (!session || !planned) {
+      return;
+    }
+
+    const recorded = performedSetsFor(planned.exerciseId).length;
+    if (recorded > 0 && !window.confirm("この種目の残りセットを後回しにします。記録済みセットは残ります。よろしいですか？")) {
+      return;
+    }
+
+    session.exerciseStatuses[planned.exerciseId] = "deferred";
+    const currentIndex = session.activeOrder.indexOf(planned.exerciseId);
+    if (currentIndex >= 0) {
+      session.activeOrder.splice(currentIndex, 1);
+      session.activeOrder.push(planned.exerciseId);
+    }
+
+    const nextTarget = firstAvailableTargetFrom(Math.max(0, currentIndex));
+    if (nextTarget && nextTarget.exerciseId !== planned.exerciseId) {
+      moveToTarget(nextTarget);
+      saveSession(session);
+      state.coachNote = `${EXERCISES[planned.exerciseId].name}を後回し。`;
+      setView("input");
+      return;
+    }
+
+    state.coachNote = "他に進める種目がありません。";
+    saveSession(session);
+    renderInput();
+  }
+
+  function skipCurrentExercise() {
+    const session = state.session;
+    const planned = currentPlanned();
+    if (!session || !planned) {
+      return;
+    }
+
+    if (!window.confirm("この種目を今日はスキップします。よろしいですか？")) {
+      return;
+    }
+
+    session.exerciseStatuses[planned.exerciseId] = "skipped";
+    const nextTarget = firstSetOfNextExercise(session.currentExerciseIndex);
+    if (nextTarget) {
+      moveToTarget(nextTarget);
+      saveSession(session);
+      state.coachNote = `${EXERCISES[planned.exerciseId].name}をスキップ。`;
+      setView("input");
+      return;
+    }
+
+    saveSession(session);
+    completeSession();
   }
 
   function startRest(seconds) {
@@ -785,7 +888,7 @@
       return;
     }
 
-    const exerciseIndex = state.session.plannedSession.plannedExercises.findIndex((planned) => planned.exerciseId === last.exerciseId);
+    const exerciseIndex = state.session.activeOrder.indexOf(last.exerciseId);
     if (exerciseIndex < 0) {
       return;
     }
@@ -806,7 +909,7 @@
       return;
     }
 
-    const exerciseIndex = state.session.plannedSession.plannedExercises.findIndex((planned) => planned.exerciseId === last.exerciseId);
+    const exerciseIndex = state.session.activeOrder.indexOf(last.exerciseId);
     const nextTarget = firstSetOfNextExercise(exerciseIndex);
     if (nextTarget) {
       moveToTarget(nextTarget);
@@ -822,8 +925,10 @@
     setView("next");
   }
 
-  function createSession() {
+  function createSession(order = defaultOrder()) {
     const now = new Date();
+    const plannedOrder = defaultOrder();
+    const activeOrder = order.length ? [...order] : [...plannedOrder];
     return {
       id: `session-${now.toISOString()}`,
       status: "active",
@@ -832,6 +937,10 @@
       allOutBanned: false,
       currentExerciseIndex: 0,
       currentSetNumber: 1,
+      plannedOrder,
+      activeOrder,
+      actualOrder: [],
+      exerciseStatuses: createExerciseStatuses(plannedOrder),
       plannedSession: {
         id: SESSION_PLAN.id,
         date: dateKey(now),
@@ -857,7 +966,7 @@
   }
 
   function markSessionAtEnd() {
-    state.session.currentExerciseIndex = state.session.plannedSession.plannedExercises.length;
+    state.session.currentExerciseIndex = state.session.activeOrder.length;
     state.session.currentSetNumber = 0;
     resetDraft();
   }
@@ -872,23 +981,37 @@
     if (!state.session) {
       return null;
     }
-    return state.session.plannedSession.plannedExercises[state.session.currentExerciseIndex] || null;
+    const exerciseId = state.session.activeOrder[state.session.currentExerciseIndex];
+    return exerciseId ? plannedById(exerciseId, state.session.plannedSession.plannedExercises) : null;
   }
 
   function nextTargetAfter(exerciseIndex, setNumber, rir) {
-    const planned = state.session.plannedSession.plannedExercises[exerciseIndex];
+    const exerciseId = state.session.activeOrder[exerciseIndex];
+    const planned = plannedById(exerciseId, state.session.plannedSession.plannedExercises);
     if (rir !== "0" && setNumber < planned.sets) {
-      return { exerciseIndex, setNumber: setNumber + 1 };
+      return { exerciseIndex, setNumber: setNumber + 1, exerciseId };
     }
     return firstSetOfNextExercise(exerciseIndex);
   }
 
   function firstSetOfNextExercise(exerciseIndex) {
-    const nextIndex = exerciseIndex + 1;
-    if (nextIndex >= state.session.plannedSession.plannedExercises.length) {
-      return null;
+    return firstAvailableTargetFrom(exerciseIndex + 1);
+  }
+
+  function firstAvailableTargetFrom(startIndex) {
+    const session = state.session;
+    for (let index = startIndex; index < session.activeOrder.length; index += 1) {
+      const exerciseId = session.activeOrder[index];
+      const status = session.exerciseStatuses[exerciseId] || "pending";
+      if (status !== "completed" && status !== "skipped") {
+        return {
+          exerciseIndex: index,
+          setNumber: nextSetNumberForExercise(exerciseId),
+          exerciseId,
+        };
+      }
     }
-    return { exerciseIndex: nextIndex, setNumber: 1 };
+    return null;
   }
 
   function transitionInfo() {
@@ -897,8 +1020,8 @@
       return null;
     }
 
-    const completedExerciseIndex = state.session.plannedSession.plannedExercises.findIndex((planned) => planned.exerciseId === last.exerciseId);
-    const completedPlanned = state.session.plannedSession.plannedExercises[completedExerciseIndex];
+    const completedExerciseIndex = state.session.activeOrder.indexOf(last.exerciseId);
+    const completedPlanned = plannedById(last.exerciseId, state.session.plannedSession.plannedExercises);
     const completedExercise = EXERCISES[last.exerciseId];
     const nextPlanned = currentPlanned();
     const regularCompleted = performedSetsFor(last.exerciseId).filter((set) => !set.painFlag && !set.isExtraSet).length;
@@ -922,11 +1045,12 @@
 
     if (nextPlanned) {
       const nextExercise = EXERCISES[nextPlanned.exerciseId];
+      const isDeferredReturn = state.session.exerciseStatuses[nextPlanned.exerciseId] === "deferred";
       return {
-        kind: "nextExercise",
-        title: "次の種目",
+        kind: isDeferredReturn ? "deferred" : "nextExercise",
+        title: isDeferredReturn ? "後回し種目" : "次の種目",
         eyebrow: `${completedExercise.name} 完了`,
-        primaryLabel: `次の種目へ：${nextExercise.name}`,
+        primaryLabel: `${isDeferredReturn ? "後回し種目へ" : "次の種目へ"}：${nextExercise.name}`,
         planned: nextPlanned,
         exercise: nextExercise,
         setNumber: 1,
@@ -971,6 +1095,124 @@
       <p>${line2}</p>
       <p>${line3}</p>
     `;
+  }
+
+  function defaultOrder() {
+    return SESSION_PLAN.plannedExercises.map((planned) => planned.exerciseId);
+  }
+
+  function plannedById(exerciseId, plannedExercises = SESSION_PLAN.plannedExercises) {
+    return plannedExercises.find((planned) => planned.exerciseId === exerciseId);
+  }
+
+  function createExerciseStatuses(order) {
+    return order.reduce((statuses, exerciseId) => {
+      statuses[exerciseId] = "pending";
+      return statuses;
+    }, {});
+  }
+
+  function moveMenuExercise(exerciseId, direction) {
+    const index = state.menuOrder.indexOf(exerciseId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= state.menuOrder.length) {
+      return;
+    }
+    const nextOrder = [...state.menuOrder];
+    [nextOrder[index], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[index]];
+    state.menuOrder = nextOrder;
+    renderMenu();
+  }
+
+  function nextSetNumberForExercise(exerciseId) {
+    const planned = plannedById(exerciseId, state.session.plannedSession.plannedExercises);
+    const completedRegularSets = performedSetsFor(exerciseId).filter((set) => !set.painFlag && !set.isExtraSet).length;
+    return Math.min(completedRegularSets + 1, planned.sets);
+  }
+
+  function markExerciseStarted(exerciseId) {
+    const status = state.session.exerciseStatuses[exerciseId];
+    if (status === "pending" || status === "deferred") {
+      state.session.exerciseStatuses[exerciseId] = "in_progress";
+    }
+    if (!state.session.actualOrder.includes(exerciseId)) {
+      state.session.actualOrder.push(exerciseId);
+    }
+  }
+
+  function updateExerciseStatusAfterSet(exerciseId, rir) {
+    const planned = plannedById(exerciseId, state.session.plannedSession.plannedExercises);
+    const regularSets = performedSetsFor(exerciseId).filter((set) => !set.painFlag && !set.isExtraSet);
+    if (rir === "0" || regularSets.length >= planned.sets) {
+      state.session.exerciseStatuses[exerciseId] = "completed";
+      return;
+    }
+    state.session.exerciseStatuses[exerciseId] = "in_progress";
+  }
+
+  function hasFollowingUnfinishedExercise(exerciseId) {
+    const index = state.session.activeOrder.indexOf(exerciseId);
+    return state.session.activeOrder.slice(index + 1).some((nextExerciseId) => {
+      const status = state.session.exerciseStatuses[nextExerciseId] || "pending";
+      return status !== "completed" && status !== "skipped";
+    });
+  }
+
+  function isLastUnfinishedExercise(exerciseId) {
+    const unfinished = state.session.activeOrder.filter((nextExerciseId) => {
+      const status = state.session.exerciseStatuses[nextExerciseId] || "pending";
+      return status !== "completed" && status !== "skipped";
+    });
+    return unfinished.length === 1 && unfinished[0] === exerciseId;
+  }
+
+  function rebuildSessionProgress() {
+    const skipped = new Set(Object.entries(state.session.exerciseStatuses || {})
+      .filter(([, status]) => status === "skipped")
+      .map(([exerciseId]) => exerciseId));
+    state.session.exerciseStatuses = createExerciseStatuses(state.session.plannedOrder || defaultOrder());
+    skipped.forEach((exerciseId) => {
+      state.session.exerciseStatuses[exerciseId] = "skipped";
+    });
+    state.session.actualOrder = [];
+    state.session.performedSets.forEach((set) => {
+      if (!state.session.actualOrder.includes(set.exerciseId)) {
+        state.session.actualOrder.push(set.exerciseId);
+      }
+      if (set.painFlag) {
+        state.session.exerciseStatuses[set.exerciseId] = "completed";
+        return;
+      }
+      updateExerciseStatusAfterSet(set.exerciseId, set.rir);
+    });
+    recalculateAllOutBan();
+  }
+
+  function renderOrderSummary(session) {
+    if (sameOrder(session.plannedOrder, session.actualOrder)) {
+      return "";
+    }
+
+    const planned = formatOrder(session.plannedOrder);
+    const actual = session.actualOrder.length ? formatOrder(session.actualOrder) : "記録なし";
+    return `
+      <section class="summary-card order-summary">
+        <h2>実施順</h2>
+        <p class="muted">予定順: ${planned}</p>
+        <p class="muted">実施順: ${actual}</p>
+      </section>
+    `;
+  }
+
+  function formatOrder(order) {
+    return order.map((exerciseId) => EXERCISES[exerciseId]?.name || exerciseId).join(" → ");
+  }
+
+  function sameOrder(left = [], right = []) {
+    if (left.length !== right.length) {
+      return false;
+    }
+    return left.every((exerciseId, index) => exerciseId === right[index]);
   }
 
   function ensureDraft(planned) {
@@ -1056,6 +1298,14 @@
   }
 
   function normalizeLoadedSession(session) {
+    const plannedOrder = session.plannedOrder || session.plannedSession?.plannedExercises?.map((planned) => planned.exerciseId) || defaultOrder();
+    session.plannedOrder = plannedOrder;
+    session.activeOrder = session.activeOrder || [...plannedOrder];
+    session.actualOrder = session.actualOrder || [];
+    session.exerciseStatuses = {
+      ...createExerciseStatuses(plannedOrder),
+      ...(session.exerciseStatuses || {}),
+    };
     session.performedSets = (session.performedSets || []).map((set) => ({
       isExtraSet: false,
       ...set,
@@ -1122,6 +1372,9 @@
     if (exercise.type === "heavy_compound") {
       return "RIR0は非推奨。記録前に確認します。";
     }
+    if (planned.exerciseId === "leg_extension" && hasFollowingUnfinishedExercise(planned.exerciseId)) {
+      return "後続種目あり。RIR0は確認して記録。";
+    }
     if (canUseRestPause(planned, setNumber)) {
       return "レストポーズ可。フォーム固定。";
     }
@@ -1132,7 +1385,10 @@
     if (state.session?.allOutBanned) {
       return false;
     }
-    return planned.restPauseAllowed && planned.exerciseId === "leg_extension" && setNumber >= planned.sets;
+    return planned.restPauseAllowed
+      && planned.exerciseId === "leg_extension"
+      && setNumber >= planned.sets
+      && isLastUnfinishedExercise(planned.exerciseId);
   }
 
   function targetRirFor(planned, setNumber) {
@@ -1186,8 +1442,14 @@
     return `${prefix}${actual} x ${set.reps}回 RIR${set.rir} / RPE${set.rpe}${diff}`;
   }
 
-  function summaryNotes(planned, exercise, sets) {
+  function summaryNotes(planned, exercise, sets, status) {
     const notes = [];
+    if (status === "deferred" || wasDeferred(planned.exerciseId)) {
+      notes.push("後回しあり");
+    }
+    if (status === "skipped") {
+      notes.push("スキップ");
+    }
     if (sets.some((set) => set.painFlag)) {
       notes.push("痛みあり");
     }
@@ -1198,6 +1460,12 @@
       notes.push("追加セットあり");
     }
     return notes.join(" / ");
+  }
+
+  function wasDeferred(exerciseId) {
+    const plannedIndex = (state.session.plannedOrder || []).indexOf(exerciseId);
+    const activeIndex = (state.session.activeOrder || []).indexOf(exerciseId);
+    return plannedIndex >= 0 && activeIndex >= 0 && plannedIndex !== activeIndex;
   }
 
   function judgeExercise(planned, exercise, sets) {

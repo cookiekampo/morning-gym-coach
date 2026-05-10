@@ -298,6 +298,16 @@ h3 {
   margin-top: 0;
 }
 
+.settings-panel {
+  background: var(--surface-2);
+}
+
+.settings-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 .compact-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -330,6 +340,23 @@ h3 {
   font-size: clamp(4.8rem, 29vw, 7.2rem);
   font-weight: 900;
   line-height: 0.95;
+}
+
+.timer-count.rest-ended {
+  color: var(--accent);
+}
+
+.notice-pill {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 0 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(73, 211, 180, 0.16);
+  color: var(--accent);
+  font-weight: 900;
 }
 
 .next-lines,
@@ -370,6 +397,18 @@ h3 {
   line-height: 1.45;
 }
 
+.summary-section-title {
+  margin: 12px 0 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.summary-note {
+  margin: 10px 0 0;
+  color: var(--warn);
+  font-weight: 900;
+}
+
 .judge {
   margin: 10px 0 0;
   color: var(--accent-2);
@@ -391,6 +430,10 @@ h3 {
   }
 
   .compact-actions.three {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-actions {
     grid-template-columns: 1fr;
   }
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = "morning-gym-coach-v0-5";
+const CACHE_NAME = "morning-gym-coach-v0-6";
 const STATIC_ASSETS = [
   "./",
   "./index.html",

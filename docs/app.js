@@ -191,7 +191,10 @@
     coachNote: "",
     copyMessage: "",
     markdownFallback: "",
+    settingsMessage: "",
     selectedCourseId: DEFAULT_COURSE_ID,
+    coursePanelOpen: false,
+    settingsPanelOpen: false,
     menuReorderMode: false,
     menuOrder: [],
     menuPlannedExercises: [],
@@ -276,15 +279,14 @@
 
     app.innerHTML = `
       <section class="screen">
+        ${renderAppHeader()}
         <header class="screen-header">
           <div>
-            <p class="eyebrow">Morning Gym Coach v0.5</p>
+            <p class="eyebrow">今日のメニュー</p>
             <h1>${courseLabel(course)}</h1>
           </div>
         </header>
-        ${renderCourseSelector(activeSession)}
         <div class="stack">${cards}</div>
-        ${renderSettingsPanel()}
         <div class="action-row">
           ${activeSession ? '<button class="button" id="continue-session" type="button">続きから</button>' : ""}
           <button class="button ghost" id="toggle-reorder" type="button">${state.menuReorderMode ? "順番変更を閉じる" : "順番を変更"}</button>
@@ -292,6 +294,7 @@
           ${latestSession ? '<button class="button ghost" id="latest-summary" type="button">直近まとめ</button>' : ""}
         </div>
       </section>
+      ${renderOverlayPanels()}
     `;
 
     document.getElementById("start-session").addEventListener("click", () => {
@@ -319,10 +322,6 @@
     document.querySelectorAll("[data-planned-weight]").forEach((input) => {
       input.addEventListener("input", () => updateMenuPlannedWeight(input.dataset.plannedWeight, input.value));
     });
-    document.querySelectorAll("[data-course-id]").forEach((button) => {
-      button.addEventListener("click", () => selectCourse(button.dataset.courseId));
-    });
-
     const continueButton = document.getElementById("continue-session");
     if (continueButton) {
       continueButton.addEventListener("click", () => {
@@ -342,28 +341,13 @@
       });
     }
 
-    wireSettingsPanel();
-  }
-
-  function renderCourseSelector(activeSession) {
-    const activeCourseId = activeSession ? sessionCourseId(activeSession) : "";
-    const buttons = Object.values(COURSE_PLANS).map((course) => {
-      const selected = course.courseId === state.selectedCourseId ? " selected" : "";
-      const active = course.courseId === activeCourseId ? " active" : "";
-      return `<button class="course-button${selected}${active}" type="button" data-course-id="${course.courseId}">${courseLabel(course)}</button>`;
-    }).join("");
-
-    return `
-      <section class="mini-panel course-selector">
-        <h3>コース</h3>
-        <div class="course-grid">${buttons}</div>
-        ${activeSession ? `<p class="helper-text">進行中: ${courseLabel(coursePlanById(activeCourseId))}</p>` : ""}
-      </section>
-    `;
+    wireGlobalControls();
   }
 
   function selectCourse(courseId) {
     if (!COURSE_PLANS[courseId] || courseId === state.selectedCourseId) {
+      state.coursePanelOpen = false;
+      render();
       return;
     }
 
@@ -380,6 +364,8 @@
     saveLastCourseId(courseId);
     resetWorkingMenu();
     clearSummaryTools();
+    state.coursePanelOpen = false;
+    state.settingsMessage = "";
     renderMenu();
   }
 
@@ -409,6 +395,7 @@
 
     app.innerHTML = `
       <section class="screen">
+        ${renderAppHeader()}
         <header class="screen-header">
           <div>
             <p class="eyebrow">${state.session.plannedSession.name} / ${state.session.plannedSession.durationMinutes}分</p>
@@ -455,6 +442,7 @@
           <button class="button danger" id="pain-button" type="button">痛みあり</button>
         </div>
       </section>
+      ${renderOverlayPanels()}
     `;
 
     document.getElementById("actual-weight").addEventListener("input", (event) => {
@@ -483,6 +471,7 @@
     if (deleteButton) {
       deleteButton.addEventListener("click", deleteLastSet);
     }
+    wireGlobalControls();
   }
 
   function renderLastSetPanel(set) {
@@ -566,6 +555,7 @@
 
     app.innerHTML = `
       <section class="screen timer-screen">
+        ${renderAppHeader()}
         <div>
           <p class="timer-label">${state.restFinished ? "休憩終了" : `休憩 ${state.timerTotal}秒`}</p>
           <div class="timer-count ${state.restFinished ? "rest-ended" : ""}">${state.timerRemaining}</div>
@@ -578,6 +568,7 @@
           ${extraButton || endExerciseButton}
         </div>
       </section>
+      ${renderOverlayPanels()}
     `;
 
     document.getElementById("add-rest").addEventListener("click", () => {
@@ -599,6 +590,7 @@
     if (endExerciseButtonNode) {
       endExerciseButtonNode.addEventListener("click", endExerciseFromRest);
     }
+    wireGlobalControls();
   }
 
   function renderNext() {
@@ -619,6 +611,7 @@
 
     app.innerHTML = `
       <section class="screen">
+        ${renderAppHeader()}
         <header class="screen-header">
           <div>
             <p class="eyebrow">${info.eyebrow}</p>
@@ -632,6 +625,7 @@
           ${state.coachNote ? `<p class="helper-text">${state.coachNote}</p>` : ""}
         </div>
       </section>
+      ${renderOverlayPanels()}
     `;
 
     document.getElementById("next-primary").addEventListener("click", handleTransitionPrimaryFromNext);
@@ -639,6 +633,7 @@
     if (addExtraButton) {
       addExtraButton.addEventListener("click", addExtraSetFromLast);
     }
+    wireGlobalControls();
   }
 
   function renderSummary() {
@@ -680,6 +675,7 @@
 
     app.innerHTML = `
       <section class="screen">
+        ${renderAppHeader()}
         <header class="screen-header">
           <div>
             <p class="eyebrow">${formatDateTime(session.startedAt)}</p>
@@ -688,14 +684,14 @@
         </header>
         ${orderSummary}
         ${renderLogTools(session)}
-        ${renderCoachMemoPanel(session)}
+        ${renderCoachMemoSummary(session)}
         <div class="stack">${cards}</div>
-        ${renderSettingsPanel()}
         <div class="action-row">
           <button class="button primary" id="new-session" type="button">新しく始める</button>
           <button class="button ghost" id="back-menu" type="button">メニューへ</button>
         </div>
       </section>
+      ${renderOverlayPanels()}
     `;
 
     document.getElementById("new-session").addEventListener("click", () => {
@@ -719,8 +715,7 @@
       setView("menu");
     });
     wireLogTools();
-    wireCoachMemoPanel(session);
-    wireSettingsPanel();
+    wireGlobalControls();
   }
 
   function renderLogTools(session) {
@@ -773,20 +768,22 @@
     renderSummary();
   }
 
-  function renderCoachMemoPanel(session) {
+  function renderCoachMemoSummary(session) {
+    if (!session.coachMemo) {
+      return "";
+    }
     return `
       <section class="mini-panel coach-memo-panel">
         <h3>コーチメモ</h3>
-        <textarea id="coach-memo-input" class="coach-memo-input" rows="5" placeholder="ChatGPTの返答を貼り付け">${escapeHtml(session.coachMemo || "")}</textarea>
-        <div class="compact-actions">
-          <button class="button" id="save-coach-memo" type="button">コーチメモを保存</button>
-          <button class="button ghost" id="delete-coach-memo" type="button">コーチメモを削除</button>
-        </div>
+        <p class="memo-preview">${escapeHtml(session.coachMemo)}</p>
       </section>
     `;
   }
 
   function wireCoachMemoPanel(session) {
+    if (!session) {
+      return;
+    }
     const input = document.getElementById("coach-memo-input");
     const saveButton = document.getElementById("save-coach-memo");
     const deleteButton = document.getElementById("delete-coach-memo");
@@ -796,8 +793,8 @@
         session.coachMemo = input.value;
         state.session = session;
         saveSession(session);
-        state.copyMessage = "コーチメモを保存しました";
-        renderSummary();
+        state.settingsMessage = "コーチメモを保存しました";
+        render();
       });
     }
 
@@ -806,25 +803,114 @@
         session.coachMemo = "";
         state.session = session;
         saveSession(session);
-        state.copyMessage = "コーチメモを削除しました";
-        renderSummary();
+        state.settingsMessage = "コーチメモを削除しました";
+        render();
       });
     }
   }
 
-  function renderSettingsPanel() {
+  function renderAppHeader() {
+    const course = displayCoursePlan();
     return `
-      <section class="mini-panel settings-panel">
-        <h3>設定</h3>
-        <div class="settings-actions">
+      <header class="app-header">
+        <div class="brand-block">
+          <p class="brand-name">Morning Gym Coach</p>
+          <button class="course-trigger" id="open-course-panel" type="button">コース: ${courseLabel(course)} ▾</button>
+        </div>
+        <button class="settings-trigger" id="open-settings-panel" type="button" aria-label="設定">設定</button>
+      </header>
+    `;
+  }
+
+  function displayCourseId() {
+    return state.session ? sessionCourseId(state.session) : state.selectedCourseId;
+  }
+
+  function displayCoursePlan() {
+    return coursePlanById(displayCourseId());
+  }
+
+  function currentMemoSession() {
+    if (state.session) {
+      return state.session;
+    }
+    return loadActiveSession() || getLatestSession();
+  }
+
+  function renderOverlayPanels() {
+    return `${renderCoursePanel()}${renderSettingsPanel()}`;
+  }
+
+  function renderCoursePanel() {
+    if (!state.coursePanelOpen) {
+      return "";
+    }
+    const selectedCourseId = displayCourseId();
+    const buttons = Object.values(COURSE_PLANS).map((course) => {
+      const selected = course.courseId === selectedCourseId;
+      return `
+        <button class="sheet-list-button${selected ? " selected" : ""}" type="button" data-panel-course-id="${course.courseId}">
+          <span>${courseLabel(course)}</span>
+          ${selected ? "<strong>選択中</strong>" : ""}
+        </button>
+      `;
+    }).join("");
+
+    return `
+      <div class="sheet-backdrop" data-close-panel="course"></div>
+      <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="course-panel-title">
+        <div class="sheet-header">
+          <h2 id="course-panel-title">コースを選択</h2>
+          <button class="sheet-close" type="button" data-close-panel="course">閉じる</button>
+        </div>
+        <div class="sheet-list">${buttons}</div>
+      </section>
+    `;
+  }
+
+  function renderSettingsPanel() {
+    if (!state.settingsPanelOpen) {
+      return "";
+    }
+    const memoSession = currentMemoSession();
+    const memoText = memoSession?.coachMemo || "";
+    const memoControls = memoSession
+      ? `
+        <textarea id="coach-memo-input" class="coach-memo-input" rows="5" placeholder="ChatGPTの返答を貼り付け">${escapeHtml(memoText)}</textarea>
+        <div class="compact-actions">
+          <button class="button" id="save-coach-memo" type="button">コーチメモを保存</button>
+          <button class="button ghost" id="delete-coach-memo" type="button">コーチメモを削除</button>
+        </div>
+      `
+      : `
+        <textarea id="coach-memo-input" class="coach-memo-input" rows="5" placeholder="セッション開始後に保存できます" disabled></textarea>
+        <div class="compact-actions">
+          <button class="button" type="button" disabled>コーチメモを保存</button>
+          <button class="button ghost" type="button" disabled>コーチメモを削除</button>
+        </div>
+        <p class="helper-text">保存先のセッションがまだありません。</p>
+      `;
+
+    return `
+      <div class="sheet-backdrop" data-close-panel="settings"></div>
+      <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="settings-panel-title">
+        <div class="sheet-header">
+          <h2 id="settings-panel-title">設定</h2>
+          <button class="sheet-close" type="button" data-close-panel="settings">閉じる</button>
+        </div>
+        <div class="settings-stack">
           ${notificationControlHtml()}
           <button class="button ghost" id="restart-today" type="button">今日のトレーニングをやり直す</button>
           <button class="button warning" id="delete-today-records" type="button">今日の記録だけ削除</button>
-        </div>
-        <p class="helper-text">通知はこの端末の対応環境のみ。サーバープッシュ通知は使いません。</p>
-        <div class="danger-zone">
-          <h3>危険エリア</h3>
-          <button class="button danger" id="delete-all-records" type="button">すべての記録を削除</button>
+          <section class="settings-section">
+            <h3>コーチメモ</h3>
+            ${memoControls}
+          </section>
+          ${state.settingsMessage ? `<p class="helper-text">${state.settingsMessage}</p>` : ""}
+          <section class="danger-zone">
+            <h3>危険エリア</h3>
+            <button class="button danger" id="delete-all-records" type="button">すべての記録を削除</button>
+          </section>
         </div>
       </section>
     `;
@@ -843,7 +929,44 @@
     return '<button class="button" id="allow-notifications" type="button">通知を許可</button>';
   }
 
-  function wireSettingsPanel() {
+  function wireGlobalControls() {
+    const courseButton = document.getElementById("open-course-panel");
+    if (courseButton) {
+      courseButton.addEventListener("click", () => {
+        state.coursePanelOpen = true;
+        state.settingsPanelOpen = false;
+        render();
+      });
+    }
+
+    const settingsButton = document.getElementById("open-settings-panel");
+    if (settingsButton) {
+      settingsButton.addEventListener("click", () => {
+        state.settingsPanelOpen = true;
+        state.coursePanelOpen = false;
+        state.settingsMessage = "";
+        render();
+      });
+    }
+
+    document.querySelectorAll("[data-close-panel]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const panel = button.dataset.closePanel;
+        if (panel === "course") {
+          state.coursePanelOpen = false;
+        }
+        if (panel === "settings") {
+          state.settingsPanelOpen = false;
+          state.settingsMessage = "";
+        }
+        render();
+      });
+    });
+
+    document.querySelectorAll("[data-panel-course-id]").forEach((button) => {
+      button.addEventListener("click", () => selectCourse(button.dataset.panelCourseId));
+    });
+
     const allowButton = document.getElementById("allow-notifications");
     if (allowButton && "Notification" in window) {
       allowButton.addEventListener("click", () => {
@@ -865,6 +988,8 @@
     if (deleteAllButton) {
       deleteAllButton.addEventListener("click", deleteAllRecords);
     }
+
+    wireCoachMemoPanel(currentMemoSession());
   }
 
   function recordSet() {
@@ -1034,6 +1159,9 @@
     window.localStorage.removeItem(STORAGE_ACTIVE_KEY);
     window.localStorage.removeItem(STORAGE_LAST_COURSE_KEY);
     state.selectedCourseId = DEFAULT_COURSE_ID;
+    state.coursePanelOpen = false;
+    state.settingsPanelOpen = false;
+    state.settingsMessage = "";
     resetWorkingMenu();
     state.session = null;
     state.coachNote = "";
@@ -1058,11 +1186,13 @@
     window.localStorage.setItem(STORAGE_SESSIONS_KEY, JSON.stringify(sessions));
     window.localStorage.removeItem(STORAGE_ACTIVE_KEY);
     stopTimer();
+    state.settingsPanelOpen = false;
     resetWorkingMenu();
     state.session = null;
     state.coachNote = "";
     state.copyMessage = "";
     state.markdownFallback = "";
+    state.settingsMessage = "";
     state.restFinished = false;
     state.restNotified = false;
     resetDraft();
@@ -1086,9 +1216,11 @@
     if (state.session && sessionDate(state.session) === today) {
       state.session = null;
     }
+    state.settingsPanelOpen = false;
     state.coachNote = "";
     state.copyMessage = "";
     state.markdownFallback = "";
+    state.settingsMessage = "";
     resetDraft();
     setView("menu");
   }

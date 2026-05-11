@@ -318,6 +318,39 @@ h3 {
   gap: 10px;
 }
 
+.course-selector {
+  background: var(--surface-2);
+}
+
+.course-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.course-button {
+  min-height: 54px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
+  color: var(--text);
+  font-weight: 900;
+}
+
+.course-button.selected {
+  border-color: var(--accent);
+  background: rgba(73, 211, 180, 0.16);
+  color: var(--accent);
+}
+
+.course-button.active::after {
+  content: "進行中";
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
 .danger-zone {
   margin-top: 12px;
   padding-top: 12px;
@@ -509,6 +542,10 @@ h3 {
   }
 
   .settings-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .course-grid {
     grid-template-columns: 1fr;
   }
 

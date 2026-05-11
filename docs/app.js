@@ -3,6 +3,8 @@
 
   const STORAGE_SESSIONS_KEY = "morning-gym-coach:v0.1:sessions";
   const STORAGE_ACTIVE_KEY = "morning-gym-coach:v0.1:activeSession";
+  const STORAGE_LAST_COURSE_KEY = "morning-gym-coach:v0.5:lastCourse";
+  const DEFAULT_COURSE_ID = "legs_45_v0.5";
   const RIR_ZERO_WARNING = "この種目でRIR0は非推奨です。フォームが崩れていない場合のみ記録してください。";
   const LEG_EXTENSION_ALLOUT_WARNING = "まだ後続種目があります。ここでオールアウトすると後の種目に影響します。記録しますか？";
 
@@ -37,44 +39,135 @@
       allOutAllowed: true,
       restPauseAllowed: true,
     },
+    bench_press: {
+      id: "bench_press",
+      name: "ベンチプレス",
+      type: "heavy_compound",
+      loadType: "barbell_total",
+      weightStepKg: 2.5,
+      defaultRepRange: "6〜8",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    incline_dumbbell_fly: {
+      id: "incline_dumbbell_fly",
+      name: "インクラインダンベルフライ",
+      type: "isolation",
+      loadType: "dumbbell_each_hand",
+      weightStepKg: 2.5,
+      defaultRepRange: "10〜12",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    dumbbell_fly: {
+      id: "dumbbell_fly",
+      name: "ダンベルフライ",
+      type: "isolation",
+      loadType: "dumbbell_each_hand",
+      weightStepKg: 2.5,
+      defaultRepRange: "10〜12",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    pectoral_fly: {
+      id: "pectoral_fly",
+      name: "ペクトラルフライ",
+      type: "isolation",
+      loadType: "machine_stack",
+      weightStepKg: 2.5,
+      defaultRepRange: "12〜15",
+      allOutAllowed: true,
+      restPauseAllowed: true,
+    },
   };
 
-  const SESSION_PLAN = {
-    id: "legs-45-v0.4",
-    name: "脚",
-    durationMinutes: 45,
-    plannedExercises: [
-      {
-        exerciseId: "squat",
-        plannedWeightKg: 40,
-        sets: 3,
-        repRange: "6〜8",
-        targetRir: [3, 2, 1],
-        restSeconds: 180,
-        allOutAllowed: false,
-        restPauseAllowed: false,
-      },
-      {
-        exerciseId: "bulgarian_split_squat",
-        plannedWeightKg: 10,
-        sets: 2,
-        repRange: "8〜10",
-        targetRir: [2, 1],
-        restSeconds: 120,
-        allOutAllowed: false,
-        restPauseAllowed: false,
-      },
-      {
-        exerciseId: "leg_extension",
-        plannedWeightKg: 30,
-        sets: 2,
-        repRange: "12〜15",
-        targetRir: [1, 0],
-        restSeconds: 60,
-        allOutAllowed: true,
-        restPauseAllowed: true,
-      },
-    ],
+  const COURSE_PLANS = {
+    "legs_45_v0.5": {
+      courseId: "legs_45_v0.5",
+      id: "legs_45_v0.5",
+      name: "脚",
+      durationMinutes: 45,
+      plannedExercises: [
+        {
+          exerciseId: "squat",
+          plannedWeightKg: 40,
+          sets: 3,
+          repRange: "6〜8",
+          targetRir: [3, 2, 1],
+          restSeconds: 180,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "bulgarian_split_squat",
+          plannedWeightKg: 10,
+          sets: 2,
+          repRange: "8〜10",
+          targetRir: [2, 1],
+          restSeconds: 120,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "leg_extension",
+          plannedWeightKg: 30,
+          sets: 2,
+          repRange: "12〜15",
+          targetRir: [1, 0],
+          restSeconds: 60,
+          allOutAllowed: true,
+          restPauseAllowed: true,
+        },
+      ],
+    },
+    "chest_45_v0.5": {
+      courseId: "chest_45_v0.5",
+      id: "chest_45_v0.5",
+      name: "胸",
+      durationMinutes: 45,
+      plannedExercises: [
+        {
+          exerciseId: "bench_press",
+          plannedWeightKg: 40,
+          sets: 3,
+          repRange: "6〜8",
+          targetRir: [3, 2, 1],
+          restSeconds: 180,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "incline_dumbbell_fly",
+          plannedWeightKg: 7.5,
+          sets: 2,
+          repRange: "10〜12",
+          targetRir: [2, 1],
+          restSeconds: 90,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "dumbbell_fly",
+          plannedWeightKg: 7.5,
+          sets: 2,
+          repRange: "10〜12",
+          targetRir: [2, 1],
+          restSeconds: 90,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "pectoral_fly",
+          plannedWeightKg: 30,
+          sets: 2,
+          repRange: "12〜15",
+          targetRir: [1, 0],
+          restSeconds: 60,
+          allOutAllowed: true,
+          restPauseAllowed: true,
+        },
+      ],
+    },
   };
 
   const RIR_OPTIONS = ["4+", "3", "2", "1", "0"];
@@ -98,15 +191,16 @@
     coachNote: "",
     copyMessage: "",
     markdownFallback: "",
+    selectedCourseId: DEFAULT_COURSE_ID,
     menuReorderMode: false,
     menuOrder: [],
     menuPlannedExercises: [],
   };
 
   document.addEventListener("DOMContentLoaded", () => {
-    state.menuOrder = defaultOrder();
-    state.menuPlannedExercises = clone(SESSION_PLAN.plannedExercises);
     state.session = loadActiveSession();
+    state.selectedCourseId = state.session ? sessionCourseId(state.session) : loadLastCourseId();
+    resetWorkingMenu();
     render();
   });
 
@@ -146,11 +240,12 @@
   function renderMenu() {
     const activeSession = loadActiveSession();
     const latestSession = getLatestSession();
+    const course = currentCoursePlan();
     if (!state.menuOrder.length) {
       state.menuOrder = defaultOrder();
     }
     if (!state.menuPlannedExercises.length) {
-      state.menuPlannedExercises = clone(SESSION_PLAN.plannedExercises);
+      state.menuPlannedExercises = clone(course.plannedExercises);
     }
     const cards = state.menuOrder.map((exerciseId, index) => {
       const planned = plannedById(exerciseId, state.menuPlannedExercises);
@@ -183,10 +278,11 @@
       <section class="screen">
         <header class="screen-header">
           <div>
-            <p class="eyebrow">Morning Gym Coach v0.4</p>
-            <h1>脚 / 45分</h1>
+            <p class="eyebrow">Morning Gym Coach v0.5</p>
+            <h1>${courseLabel(course)}</h1>
           </div>
         </header>
+        ${renderCourseSelector(activeSession)}
         <div class="stack">${cards}</div>
         ${renderSettingsPanel()}
         <div class="action-row">
@@ -223,6 +319,9 @@
     document.querySelectorAll("[data-planned-weight]").forEach((input) => {
       input.addEventListener("input", () => updateMenuPlannedWeight(input.dataset.plannedWeight, input.value));
     });
+    document.querySelectorAll("[data-course-id]").forEach((button) => {
+      button.addEventListener("click", () => selectCourse(button.dataset.courseId));
+    });
 
     const continueButton = document.getElementById("continue-session");
     if (continueButton) {
@@ -244,6 +343,44 @@
     }
 
     wireSettingsPanel();
+  }
+
+  function renderCourseSelector(activeSession) {
+    const activeCourseId = activeSession ? sessionCourseId(activeSession) : "";
+    const buttons = Object.values(COURSE_PLANS).map((course) => {
+      const selected = course.courseId === state.selectedCourseId ? " selected" : "";
+      const active = course.courseId === activeCourseId ? " active" : "";
+      return `<button class="course-button${selected}${active}" type="button" data-course-id="${course.courseId}">${courseLabel(course)}</button>`;
+    }).join("");
+
+    return `
+      <section class="mini-panel course-selector">
+        <h3>コース</h3>
+        <div class="course-grid">${buttons}</div>
+        ${activeSession ? `<p class="helper-text">進行中: ${courseLabel(coursePlanById(activeCourseId))}</p>` : ""}
+      </section>
+    `;
+  }
+
+  function selectCourse(courseId) {
+    if (!COURSE_PLANS[courseId] || courseId === state.selectedCourseId) {
+      return;
+    }
+
+    const activeSession = loadActiveSession();
+    if (activeSession && sessionCourseId(activeSession) !== courseId) {
+      if (!window.confirm("現在の入力内容を破棄して、別コースを開始しますか？")) {
+        return;
+      }
+      discardActiveSession(activeSession.id);
+      state.session = null;
+    }
+
+    state.selectedCourseId = courseId;
+    saveLastCourseId(courseId);
+    resetWorkingMenu();
+    clearSummaryTools();
+    renderMenu();
   }
 
   function renderInput() {
@@ -562,6 +699,9 @@
     `;
 
     document.getElementById("new-session").addEventListener("click", () => {
+      state.selectedCourseId = sessionCourseId(session);
+      saveLastCourseId(state.selectedCourseId);
+      resetWorkingMenu();
       state.session = createSession();
       saveSession(state.session);
       resetDraft();
@@ -570,6 +710,11 @@
     });
     document.getElementById("back-menu").addEventListener("click", () => {
       state.session = loadActiveSession();
+      if (!state.session) {
+        state.selectedCourseId = sessionCourseId(session);
+        saveLastCourseId(state.selectedCourseId);
+        resetWorkingMenu();
+      }
       clearSummaryTools();
       setView("menu");
     });
@@ -725,7 +870,6 @@
   function recordSet() {
     const session = state.session;
     const planned = currentPlanned();
-    const exercise = EXERCISES[planned.exerciseId];
     const actualWeightKg = Number(state.draft.actualWeightKg);
     const plannedWeightKg = Number(state.draft.plannedWeightKg);
     const reps = Number.parseInt(state.draft.reps, 10);
@@ -752,11 +896,16 @@
       return;
     }
 
-    if (rir === "0" && exercise.type === "heavy_compound" && !window.confirm(RIR_ZERO_WARNING)) {
+    if (rir === "0" && !planned.allOutAllowed && !window.confirm(RIR_ZERO_WARNING)) {
       return;
     }
 
-    if (rir === "0" && planned.exerciseId === "leg_extension" && hasFollowingUnfinishedExercise(planned.exerciseId) && !window.confirm(LEG_EXTENSION_ALLOUT_WARNING)) {
+    if (rir === "0" && planned.allOutAllowed && session.currentSetNumber < planned.sets) {
+      window.alert("RIR0は最終セットのみ記録できます。");
+      return;
+    }
+
+    if (rir === "0" && planned.allOutAllowed && !canUseAllOutAsPlanned(planned, session.currentSetNumber) && !window.confirm(LEG_EXTENSION_ALLOUT_WARNING)) {
       return;
     }
 
@@ -883,6 +1032,8 @@
     stopTimer();
     window.localStorage.removeItem(STORAGE_SESSIONS_KEY);
     window.localStorage.removeItem(STORAGE_ACTIVE_KEY);
+    window.localStorage.removeItem(STORAGE_LAST_COURSE_KEY);
+    state.selectedCourseId = DEFAULT_COURSE_ID;
     resetWorkingMenu();
     state.session = null;
     state.coachNote = "";
@@ -1147,13 +1298,17 @@
 
   function createSession(order = defaultOrder()) {
     const now = new Date();
+    const course = currentCoursePlan();
     const plannedOrder = defaultOrder();
     const activeOrder = order.length ? [...order] : [...plannedOrder];
     const plannedExercises = state.menuPlannedExercises.length
       ? clone(state.menuPlannedExercises)
-      : clone(SESSION_PLAN.plannedExercises);
+      : clone(course.plannedExercises);
+    saveLastCourseId(course.courseId);
     return {
       id: `session-${now.toISOString()}`,
+      courseId: course.courseId,
+      course_id: course.courseId,
       status: "active",
       startedAt: now.toISOString(),
       endedAt: null,
@@ -1165,10 +1320,12 @@
       actualOrder: [],
       exerciseStatuses: createExerciseStatuses(plannedOrder),
       plannedSession: {
-        id: SESSION_PLAN.id,
+        id: course.id,
+        courseId: course.courseId,
+        course_id: course.courseId,
         date: dateKey(now),
-        name: SESSION_PLAN.name,
-        durationMinutes: SESSION_PLAN.durationMinutes,
+        name: course.name,
+        durationMinutes: course.durationMinutes,
         plannedExercises,
       },
       performedSets: [],
@@ -1322,11 +1479,23 @@
   }
 
   function defaultOrder() {
-    return SESSION_PLAN.plannedExercises.map((planned) => planned.exerciseId);
+    return currentCoursePlan().plannedExercises.map((planned) => planned.exerciseId);
   }
 
-  function plannedById(exerciseId, plannedExercises = SESSION_PLAN.plannedExercises) {
+  function plannedById(exerciseId, plannedExercises = currentCoursePlan().plannedExercises) {
     return plannedExercises.find((planned) => planned.exerciseId === exerciseId);
+  }
+
+  function currentCoursePlan() {
+    return coursePlanById(state.selectedCourseId);
+  }
+
+  function coursePlanById(courseId) {
+    return COURSE_PLANS[courseId] || COURSE_PLANS[DEFAULT_COURSE_ID];
+  }
+
+  function courseLabel(course) {
+    return `${course.name} / ${course.durationMinutes}分`;
   }
 
   function createExerciseStatuses(order) {
@@ -1372,8 +1541,9 @@
   }
 
   function resetWorkingMenu() {
+    const course = currentCoursePlan();
     state.menuOrder = defaultOrder();
-    state.menuPlannedExercises = clone(SESSION_PLAN.plannedExercises);
+    state.menuPlannedExercises = clone(course.plannedExercises);
     state.menuReorderMode = false;
   }
 
@@ -1556,7 +1726,14 @@
   }
 
   function normalizeLoadedSession(session) {
+    const courseId = sessionCourseId(session);
     const plannedOrder = session.plannedOrder || session.plannedSession?.plannedExercises?.map((planned) => planned.exerciseId) || defaultOrder();
+    session.courseId = courseId;
+    session.course_id = courseId;
+    if (session.plannedSession) {
+      session.plannedSession.courseId = session.plannedSession.courseId || courseId;
+      session.plannedSession.course_id = session.plannedSession.course_id || courseId;
+    }
     session.plannedOrder = plannedOrder;
     session.activeOrder = session.activeOrder || [...plannedOrder];
     session.actualOrder = session.actualOrder || [];
@@ -1571,6 +1748,42 @@
     session.coachMemo = session.coachMemo || "";
     session.allOutBanned = Boolean(session.allOutBanned);
     return session;
+  }
+
+  function sessionCourseId(session) {
+    const explicit = session?.courseId || session?.course_id || session?.plannedSession?.courseId || session?.plannedSession?.course_id;
+    if (COURSE_PLANS[explicit]) {
+      return explicit;
+    }
+
+    const legacyId = session?.plannedSession?.id || session?.id || "";
+    if (legacyId.includes("chest")) {
+      return "chest_45_v0.5";
+    }
+    const exerciseIds = (session?.plannedSession?.plannedExercises || []).map((planned) => planned.exerciseId);
+    if (exerciseIds.some((exerciseId) => ["bench_press", "incline_dumbbell_fly", "dumbbell_fly", "pectoral_fly"].includes(exerciseId))) {
+      return "chest_45_v0.5";
+    }
+    return DEFAULT_COURSE_ID;
+  }
+
+  function loadLastCourseId() {
+    const saved = window.localStorage.getItem(STORAGE_LAST_COURSE_KEY);
+    return COURSE_PLANS[saved] ? saved : DEFAULT_COURSE_ID;
+  }
+
+  function saveLastCourseId(courseId) {
+    if (COURSE_PLANS[courseId]) {
+      window.localStorage.setItem(STORAGE_LAST_COURSE_KEY, courseId);
+    }
+  }
+
+  function discardActiveSession(sessionId) {
+    if (sessionId) {
+      const sessions = loadSessions().filter((session) => session.id !== sessionId);
+      window.localStorage.setItem(STORAGE_SESSIONS_KEY, JSON.stringify(sessions));
+    }
+    window.localStorage.removeItem(STORAGE_ACTIVE_KEY);
   }
 
   function saveSession(session) {
@@ -1656,8 +1869,17 @@
     const painExercises = [...new Set(session.performedSets
       .filter((set) => set.painFlag)
       .map((set) => EXERCISES[set.exerciseId]?.name || set.exerciseId))];
-    const heavyRirZero = [...new Set(session.performedSets
-      .filter((set) => set.rir === "0" && EXERCISES[set.exerciseId]?.type === "heavy_compound")
+    const warningRirZero = [...new Set(session.performedSets
+      .filter((set) => {
+        const planned = plannedById(set.exerciseId, session.plannedSession.plannedExercises);
+        return set.rir === "0" && planned && !planned.allOutAllowed;
+      })
+      .map((set) => EXERCISES[set.exerciseId]?.name || set.exerciseId))];
+    const allOutRirZero = [...new Set(session.performedSets
+      .filter((set) => {
+        const planned = plannedById(set.exerciseId, session.plannedSession.plannedExercises);
+        return set.rir === "0" && planned?.allOutAllowed;
+      })
       .map((set) => EXERCISES[set.exerciseId]?.name || set.exerciseId))];
 
     if (extraExercises.length) {
@@ -1669,8 +1891,11 @@
     if (painExercises.length) {
       notes.push(`痛みあり: ${painExercises.join("、")}`);
     }
-    if (heavyRirZero.length) {
-      notes.push(`RIR0記録あり。次回はフォーム確認: ${heavyRirZero.join("、")}`);
+    if (warningRirZero.length) {
+      notes.push(`RIR0記録あり。次回はフォーム確認: ${warningRirZero.join("、")}`);
+    }
+    if (allOutRirZero.length) {
+      notes.push(`オールアウト記録: ${allOutRirZero.join("、")}`);
     }
     if (!sameOrder(session.plannedOrder, session.actualOrder)) {
       notes.push("予定順と実施順が違います");
@@ -1701,24 +1926,26 @@
   }
 
   function menuSafetyText(planned, exercise) {
-    if (exercise.type === "heavy_compound") {
-      return "RIR0は警告付きで記録可。フォーム優先。";
+    if (!planned.allOutAllowed) {
+      return "RIR0は非推奨。警告付きで記録可。";
     }
-    if (exercise.id === "leg_extension") {
-      return "RIR0可。最終セットのみレストポーズ可。";
+    if (planned.restPauseAllowed) {
+      return "最終セットのみオールアウト可。レストポーズ可。";
     }
     return planned.allOutAllowed ? "RIR0可。" : "フォーム優先。";
   }
 
   function inputSafetyText(planned, setNumber) {
-    const exercise = EXERCISES[planned.exerciseId];
     if (state.session?.allOutBanned) {
       return "痛みあり後: RIR0とレストポーズは禁止。";
     }
-    if (exercise.type === "heavy_compound") {
+    if (!planned.allOutAllowed) {
       return "RIR0は非推奨。記録前に確認します。";
     }
-    if (planned.exerciseId === "leg_extension" && hasFollowingUnfinishedExercise(planned.exerciseId)) {
+    if (setNumber < planned.sets) {
+      return "RIR0は最終セットのみ。フォーム優先。";
+    }
+    if (!canUseAllOutAsPlanned(planned, setNumber)) {
       return "後続種目あり。RIR0は確認して記録。";
     }
     if (canUseRestPause(planned, setNumber)) {
@@ -1732,7 +1959,15 @@
       return false;
     }
     return planned.restPauseAllowed
-      && planned.exerciseId === "leg_extension"
+      && setNumber >= planned.sets
+      && isLastUnfinishedExercise(planned.exerciseId);
+  }
+
+  function canUseAllOutAsPlanned(planned, setNumber) {
+    if (state.session?.allOutBanned) {
+      return false;
+    }
+    return planned.allOutAllowed
       && setNumber >= planned.sets
       && isLastUnfinishedExercise(planned.exerciseId);
   }
@@ -1799,7 +2034,7 @@
     if (sets.some((set) => set.painFlag)) {
       notes.push("痛みあり");
     }
-    if (exercise.type === "heavy_compound" && sets.some((set) => set.rir === "0")) {
+    if (!planned.allOutAllowed && sets.some((set) => set.rir === "0")) {
       notes.push("RIR0記録あり。次回はフォーム確認");
     }
     if (sets.some((set) => set.isExtraSet)) {
@@ -1829,7 +2064,7 @@
     const topRange = regularSets.every((set) => set.reps >= maxRep);
     const rirEnough = regularSets.every((set, index) => rirNumber(set.rir) >= planned.targetRir[index]);
 
-    if (exercise.type === "heavy_compound" && regularSets.some((set) => set.rir === "0")) {
+    if (!planned.allOutAllowed && regularSets.some((set) => set.rir === "0")) {
       return "RIR0記録あり。次回はフォーム確認。";
     }
 

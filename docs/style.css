@@ -244,6 +244,16 @@ h3 {
   text-align: center;
 }
 
+.weight-editor {
+  margin-top: 10px;
+}
+
+.weight-editor input {
+  min-height: 48px;
+  text-align: left;
+  padding: 0 12px;
+}
+
 .rir-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -308,6 +318,16 @@ h3 {
   gap: 10px;
 }
 
+.danger-zone {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.danger-zone h3 {
+  color: var(--danger);
+}
+
 .reorder-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -333,6 +353,44 @@ h3 {
 .compact-actions .button {
   min-height: 48px;
   font-size: 0.92rem;
+}
+
+.compact-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.previous-record h3,
+.log-tools h3,
+.coach-memo-panel h3 {
+  margin-bottom: 8px;
+}
+
+.coach-memo-input,
+.copy-fallback {
+  width: 100%;
+  min-height: 126px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.copy-fallback {
+  min-height: 220px;
+  margin-top: 10px;
+  white-space: pre;
 }
 
 .timer-screen {

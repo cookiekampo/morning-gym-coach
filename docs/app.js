@@ -40,7 +40,7 @@
   };
 
   const SESSION_PLAN = {
-    id: "legs-45-v0.3",
+    id: "legs-45-v0.4",
     name: "脚",
     durationMinutes: 45,
     plannedExercises: [
@@ -96,12 +96,16 @@
     restFinished: false,
     restNotified: false,
     coachNote: "",
+    copyMessage: "",
+    markdownFallback: "",
     menuReorderMode: false,
     menuOrder: [],
+    menuPlannedExercises: [],
   };
 
   document.addEventListener("DOMContentLoaded", () => {
     state.menuOrder = defaultOrder();
+    state.menuPlannedExercises = clone(SESSION_PLAN.plannedExercises);
     state.session = loadActiveSession();
     render();
   });
@@ -145,8 +149,11 @@
     if (!state.menuOrder.length) {
       state.menuOrder = defaultOrder();
     }
+    if (!state.menuPlannedExercises.length) {
+      state.menuPlannedExercises = clone(SESSION_PLAN.plannedExercises);
+    }
     const cards = state.menuOrder.map((exerciseId, index) => {
-      const planned = plannedById(exerciseId, SESSION_PLAN.plannedExercises);
+      const planned = plannedById(exerciseId, state.menuPlannedExercises);
       const exercise = EXERCISES[planned.exerciseId];
       return `
         <article class="exercise-card">
@@ -160,6 +167,7 @@
             <div><dt>RIR</dt><dd>${formatRirPlan(planned.targetRir)}</dd></div>
             <div><dt>休憩</dt><dd>${planned.restSeconds}秒</dd></div>
           </dl>
+          ${renderPlannedWeightEditor(planned, exercise)}
           <p class="helper-text">${menuSafetyText(planned, exercise)}</p>
           ${state.menuReorderMode ? `
             <div class="reorder-actions">
@@ -175,7 +183,7 @@
       <section class="screen">
         <header class="screen-header">
           <div>
-            <p class="eyebrow">Morning Gym Coach v0.3</p>
+            <p class="eyebrow">Morning Gym Coach v0.4</p>
             <h1>脚 / 45分</h1>
           </div>
         </header>
@@ -197,6 +205,7 @@
       state.session = createSession(state.menuOrder);
       saveSession(state.session);
       resetDraft();
+      clearSummaryTools();
       setView("input");
     });
 
@@ -211,12 +220,16 @@
     document.querySelectorAll("[data-move-down]").forEach((button) => {
       button.addEventListener("click", () => moveMenuExercise(button.dataset.moveDown, 1));
     });
+    document.querySelectorAll("[data-planned-weight]").forEach((input) => {
+      input.addEventListener("input", () => updateMenuPlannedWeight(input.dataset.plannedWeight, input.value));
+    });
 
     const continueButton = document.getElementById("continue-session");
     if (continueButton) {
       continueButton.addEventListener("click", () => {
         state.session = activeSession;
         resetDraft();
+        clearSummaryTools();
         setView("input");
       });
     }
@@ -225,6 +238,7 @@
     if (latestButton) {
       latestButton.addEventListener("click", () => {
         state.session = latestSession;
+        clearSummaryTools();
         setView("summary");
       });
     }
@@ -275,6 +289,8 @@
           </dl>
           <p class="helper-text ${state.session.allOutBanned ? "safety" : ""}">${inputSafetyText(planned, setNumber)}</p>
         </section>
+
+        ${renderPreviousRecordPanel(planned.exerciseId)}
 
         <section class="panel">
           <h2>実際</h2>
@@ -346,6 +362,49 @@
         </div>
       </section>
     `;
+  }
+
+  function renderPreviousRecordPanel(exerciseId) {
+    const previous = findPreviousExerciseRecord(exerciseId);
+    if (!previous) {
+      return `
+        <section class="mini-panel previous-record">
+          <h3>前回</h3>
+          <p class="helper-text">前回記録なし</p>
+        </section>
+      `;
+    }
+
+    const exercise = EXERCISES[exerciseId];
+    const rows = previous.sets.map((set) => {
+      if (set.painFlag) {
+        return "<li>痛みあり</li>";
+      }
+      return `<li>${formatWeight(set.actualWeightKg, exercise.loadType)} x ${set.reps} RIR${set.rir}</li>`;
+    }).join("");
+
+    return `
+      <section class="mini-panel previous-record">
+        <h3>前回</h3>
+        <ul class="compact-list">${rows}</ul>
+      </section>
+    `;
+  }
+
+  function findPreviousExerciseRecord(exerciseId) {
+    const currentId = state.session?.id;
+    const sessions = loadSessions()
+      .filter((session) => session.id !== currentId)
+      .sort((left, right) => new Date(left.startedAt || 0) - new Date(right.startedAt || 0));
+
+    for (let index = sessions.length - 1; index >= 0; index -= 1) {
+      const session = normalizeLoadedSession(sessions[index]);
+      const sets = session.performedSets.filter((set) => set.exerciseId === exerciseId);
+      if (sets.length) {
+        return { session, sets };
+      }
+    }
+    return null;
   }
 
   function renderRest() {
@@ -491,6 +550,8 @@
           </div>
         </header>
         ${orderSummary}
+        ${renderLogTools(session)}
+        ${renderCoachMemoPanel(session)}
         <div class="stack">${cards}</div>
         ${renderSettingsPanel()}
         <div class="action-row">
@@ -504,13 +565,106 @@
       state.session = createSession();
       saveSession(state.session);
       resetDraft();
+      clearSummaryTools();
       setView("input");
     });
     document.getElementById("back-menu").addEventListener("click", () => {
       state.session = loadActiveSession();
+      clearSummaryTools();
       setView("menu");
     });
+    wireLogTools();
+    wireCoachMemoPanel(session);
     wireSettingsPanel();
+  }
+
+  function renderLogTools(session) {
+    const fallback = state.markdownFallback
+      ? `
+        <textarea class="copy-fallback" readonly>${escapeHtml(state.markdownFallback)}</textarea>
+        <p class="helper-text">自動コピーできないため、上の内容を手動でコピーしてください。</p>
+      `
+      : "";
+
+    return `
+      <section class="mini-panel log-tools">
+        <h3>ChatGPTレビュー用</h3>
+        <div class="settings-actions">
+          <button class="button" id="copy-log" type="button">今日のログをコピー</button>
+        </div>
+        ${state.copyMessage ? `<p class="helper-text">${state.copyMessage}</p>` : ""}
+        ${fallback}
+      </section>
+    `;
+  }
+
+  function wireLogTools() {
+    const copyButton = document.getElementById("copy-log");
+    if (copyButton) {
+      copyButton.addEventListener("click", copyMarkdownLog);
+    }
+  }
+
+  function copyMarkdownLog() {
+    const session = state.session;
+    if (!session) {
+      return;
+    }
+    const markdown = buildMarkdownLog(session);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(markdown).then(() => {
+        state.copyMessage = "コピーしました";
+        state.markdownFallback = "";
+        renderSummary();
+      }).catch(() => showMarkdownFallback(markdown));
+      return;
+    }
+    showMarkdownFallback(markdown);
+  }
+
+  function showMarkdownFallback(markdown) {
+    state.copyMessage = "";
+    state.markdownFallback = markdown;
+    renderSummary();
+  }
+
+  function renderCoachMemoPanel(session) {
+    return `
+      <section class="mini-panel coach-memo-panel">
+        <h3>コーチメモ</h3>
+        <textarea id="coach-memo-input" class="coach-memo-input" rows="5" placeholder="ChatGPTの返答を貼り付け">${escapeHtml(session.coachMemo || "")}</textarea>
+        <div class="compact-actions">
+          <button class="button" id="save-coach-memo" type="button">コーチメモを保存</button>
+          <button class="button ghost" id="delete-coach-memo" type="button">コーチメモを削除</button>
+        </div>
+      </section>
+    `;
+  }
+
+  function wireCoachMemoPanel(session) {
+    const input = document.getElementById("coach-memo-input");
+    const saveButton = document.getElementById("save-coach-memo");
+    const deleteButton = document.getElementById("delete-coach-memo");
+
+    if (saveButton && input) {
+      saveButton.addEventListener("click", () => {
+        session.coachMemo = input.value;
+        state.session = session;
+        saveSession(session);
+        state.copyMessage = "コーチメモを保存しました";
+        renderSummary();
+      });
+    }
+
+    if (deleteButton && input) {
+      deleteButton.addEventListener("click", () => {
+        session.coachMemo = "";
+        state.session = session;
+        saveSession(session);
+        state.copyMessage = "コーチメモを削除しました";
+        renderSummary();
+      });
+    }
   }
 
   function renderSettingsPanel() {
@@ -519,9 +673,14 @@
         <h3>設定</h3>
         <div class="settings-actions">
           ${notificationControlHtml()}
-          <button class="button danger" id="delete-records" type="button">記録を削除</button>
+          <button class="button ghost" id="restart-today" type="button">今日のトレーニングをやり直す</button>
+          <button class="button warning" id="delete-today-records" type="button">今日の記録だけ削除</button>
         </div>
         <p class="helper-text">通知はこの端末の対応環境のみ。サーバープッシュ通知は使いません。</p>
+        <div class="danger-zone">
+          <h3>危険エリア</h3>
+          <button class="button danger" id="delete-all-records" type="button">すべての記録を削除</button>
+        </div>
       </section>
     `;
   }
@@ -547,9 +706,19 @@
       });
     }
 
-    const deleteButton = document.getElementById("delete-records");
-    if (deleteButton) {
-      deleteButton.addEventListener("click", deleteAllRecords);
+    const restartButton = document.getElementById("restart-today");
+    if (restartButton) {
+      restartButton.addEventListener("click", restartTodayTraining);
+    }
+
+    const deleteTodayButton = document.getElementById("delete-today-records");
+    if (deleteTodayButton) {
+      deleteTodayButton.addEventListener("click", deleteTodayRecords);
+    }
+
+    const deleteAllButton = document.getElementById("delete-all-records");
+    if (deleteAllButton) {
+      deleteAllButton.addEventListener("click", deleteAllRecords);
     }
   }
 
@@ -707,17 +876,68 @@
   }
 
   function deleteAllRecords() {
-    if (!window.confirm("すべての記録を削除します。よろしいですか？")) {
+    if (!window.confirm("過去の記録を含むすべての記録を削除します。この操作は元に戻せません。本当に削除しますか？")) {
       return;
     }
 
     stopTimer();
     window.localStorage.removeItem(STORAGE_SESSIONS_KEY);
     window.localStorage.removeItem(STORAGE_ACTIVE_KEY);
+    resetWorkingMenu();
     state.session = null;
     state.coachNote = "";
     state.restFinished = false;
     state.restNotified = false;
+    resetDraft();
+    setView("menu");
+  }
+
+  function restartTodayTraining() {
+    if (!window.confirm("今日の入力内容だけを削除して、最初からやり直します。過去の記録は残ります。よろしいですか？")) {
+      return;
+    }
+
+    const activeSession = loadActiveSession();
+    if (!activeSession || !isTodaySession(activeSession)) {
+      window.alert("今日の進行中セッションはありません。");
+      return;
+    }
+
+    const sessions = loadSessions().filter((session) => session.id !== activeSession.id);
+    window.localStorage.setItem(STORAGE_SESSIONS_KEY, JSON.stringify(sessions));
+    window.localStorage.removeItem(STORAGE_ACTIVE_KEY);
+    stopTimer();
+    resetWorkingMenu();
+    state.session = null;
+    state.coachNote = "";
+    state.copyMessage = "";
+    state.markdownFallback = "";
+    state.restFinished = false;
+    state.restNotified = false;
+    resetDraft();
+    setView("menu");
+  }
+
+  function deleteTodayRecords() {
+    if (!window.confirm("今日の記録だけを削除します。過去の記録は残ります。よろしいですか？")) {
+      return;
+    }
+
+    const today = todayKey();
+    const sessions = loadSessions().filter((session) => sessionDate(session) !== today);
+    window.localStorage.setItem(STORAGE_SESSIONS_KEY, JSON.stringify(sessions));
+    const activeSession = loadActiveSession();
+    if (activeSession && sessionDate(activeSession) === today) {
+      window.localStorage.removeItem(STORAGE_ACTIVE_KEY);
+    }
+
+    stopTimer();
+    if (state.session && sessionDate(state.session) === today) {
+      state.session = null;
+    }
+    state.coachNote = "";
+    state.copyMessage = "";
+    state.markdownFallback = "";
     resetDraft();
     setView("menu");
   }
@@ -929,6 +1149,9 @@
     const now = new Date();
     const plannedOrder = defaultOrder();
     const activeOrder = order.length ? [...order] : [...plannedOrder];
+    const plannedExercises = state.menuPlannedExercises.length
+      ? clone(state.menuPlannedExercises)
+      : clone(SESSION_PLAN.plannedExercises);
     return {
       id: `session-${now.toISOString()}`,
       status: "active",
@@ -946,9 +1169,10 @@
         date: dateKey(now),
         name: SESSION_PLAN.name,
         durationMinutes: SESSION_PLAN.durationMinutes,
-        plannedExercises: clone(SESSION_PLAN.plannedExercises),
+        plannedExercises,
       },
       performedSets: [],
+      coachMemo: "",
     };
   }
 
@@ -1122,6 +1346,40 @@
     [nextOrder[index], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[index]];
     state.menuOrder = nextOrder;
     renderMenu();
+  }
+
+  function renderPlannedWeightEditor(planned, exercise) {
+    const label = exercise.loadType === "dumbbell_each_hand"
+      ? "予定重量 kg（片手）"
+      : "予定重量 kg";
+    return `
+      <div class="weight-editor field">
+        <label for="planned-weight-${exercise.id}">${label}</label>
+        <input id="planned-weight-${exercise.id}" data-planned-weight="${exercise.id}" type="number" inputmode="decimal" min="0" step="${exercise.weightStepKg}" value="${planned.plannedWeightKg}">
+      </div>
+    `;
+  }
+
+  function updateMenuPlannedWeight(exerciseId, value) {
+    const nextWeight = Number(value);
+    if (!Number.isFinite(nextWeight) || nextWeight <= 0) {
+      return;
+    }
+    const planned = plannedById(exerciseId, state.menuPlannedExercises);
+    if (planned) {
+      planned.plannedWeightKg = nextWeight;
+    }
+  }
+
+  function resetWorkingMenu() {
+    state.menuOrder = defaultOrder();
+    state.menuPlannedExercises = clone(SESSION_PLAN.plannedExercises);
+    state.menuReorderMode = false;
+  }
+
+  function clearSummaryTools() {
+    state.copyMessage = "";
+    state.markdownFallback = "";
   }
 
   function nextSetNumberForExercise(exerciseId) {
@@ -1310,6 +1568,7 @@
       isExtraSet: false,
       ...set,
     }));
+    session.coachMemo = session.coachMemo || "";
     session.allOutBanned = Boolean(session.allOutBanned);
     return session;
   }
@@ -1330,6 +1589,93 @@
     } else {
       window.localStorage.removeItem(STORAGE_ACTIVE_KEY);
     }
+  }
+
+  function buildMarkdownLog(session) {
+    normalizeLoadedSession(session);
+    const lines = [
+      "# Morning Gym Coach Log",
+      "",
+      `日付: ${sessionDate(session)}`,
+      `メニュー: ${session.plannedSession.name} / ${session.plannedSession.durationMinutes}分`,
+      "",
+      "## 予定順",
+      formatOrder(session.plannedOrder),
+      "",
+      "## 実施順",
+      session.actualOrder.length ? formatOrder(session.actualOrder) : "記録なし",
+      "",
+    ];
+
+    session.plannedSession.plannedExercises.forEach((planned) => {
+      const exercise = EXERCISES[planned.exerciseId];
+      const sets = session.performedSets.filter((set) => set.exerciseId === planned.exerciseId);
+      const status = session.exerciseStatuses[planned.exerciseId] || "pending";
+      lines.push(`## ${exercise.name}`);
+      lines.push(`予定: ${formatWeight(planned.plannedWeightKg, exercise.loadType)} / ${planned.sets}セット / ${formatRepRange(planned, exercise)}`);
+      lines.push("実績:");
+      if (status === "skipped") {
+        lines.push("- スキップ");
+      } else if (sets.length) {
+        sets.forEach((set) => lines.push(markdownPerformedSet(set, exercise)));
+      } else {
+        lines.push("- 記録なし");
+      }
+      lines.push("");
+    });
+
+    lines.push("## メモ");
+    const notes = markdownNotes(session);
+    if (notes.length) {
+      notes.forEach((note) => lines.push(`- ${note}`));
+    } else {
+      lines.push("- 特記事項なし");
+    }
+    lines.push("");
+    lines.push("## ChatGPTへの依頼");
+    lines.push("次回の重量、種目順、オールアウト種目、必要なら推定1RMを見てください。");
+    return lines.join("\n");
+  }
+
+  function markdownPerformedSet(set, exercise) {
+    if (set.painFlag) {
+      return `- ${set.isExtraSet ? "追加: " : ""}痛みあり`;
+    }
+    const prefix = set.isExtraSet ? "追加: " : "";
+    return `- ${prefix}${formatWeight(set.actualWeightKg, exercise.loadType)} x ${set.reps}回 RIR${set.rir}`;
+  }
+
+  function markdownNotes(session) {
+    const notes = [];
+    const extraExercises = session.plannedSession.plannedExercises
+      .filter((planned) => session.performedSets.some((set) => set.exerciseId === planned.exerciseId && set.isExtraSet))
+      .map((planned) => EXERCISES[planned.exerciseId].name);
+    const skippedExercises = Object.entries(session.exerciseStatuses || {})
+      .filter(([, status]) => status === "skipped")
+      .map(([exerciseId]) => EXERCISES[exerciseId]?.name || exerciseId);
+    const painExercises = [...new Set(session.performedSets
+      .filter((set) => set.painFlag)
+      .map((set) => EXERCISES[set.exerciseId]?.name || set.exerciseId))];
+    const heavyRirZero = [...new Set(session.performedSets
+      .filter((set) => set.rir === "0" && EXERCISES[set.exerciseId]?.type === "heavy_compound")
+      .map((set) => EXERCISES[set.exerciseId]?.name || set.exerciseId))];
+
+    if (extraExercises.length) {
+      notes.push(`追加セット: ${extraExercises.join("、")}`);
+    }
+    if (skippedExercises.length) {
+      notes.push(`スキップ: ${skippedExercises.join("、")}`);
+    }
+    if (painExercises.length) {
+      notes.push(`痛みあり: ${painExercises.join("、")}`);
+    }
+    if (heavyRirZero.length) {
+      notes.push(`RIR0記録あり。次回はフォーム確認: ${heavyRirZero.join("、")}`);
+    }
+    if (!sameOrder(session.plannedOrder, session.actualOrder)) {
+      notes.push("予定順と実施順が違います");
+    }
+    return notes;
   }
 
   function formatWeight(weightKg, loadType) {
@@ -1515,6 +1861,29 @@
 
   function dateKey(date) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  function todayKey() {
+    return dateKey(new Date());
+  }
+
+  function sessionDate(session) {
+    if (session?.plannedSession?.date) {
+      return session.plannedSession.date;
+    }
+    return session?.startedAt ? dateKey(new Date(session.startedAt)) : "";
+  }
+
+  function isTodaySession(session) {
+    return sessionDate(session) === todayKey();
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
   function clone(value) {

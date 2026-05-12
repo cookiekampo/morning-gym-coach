@@ -79,6 +79,46 @@
       allOutAllowed: true,
       restPauseAllowed: true,
     },
+    deadlift: {
+      id: "deadlift",
+      name: "デッドリフト",
+      type: "heavy_compound",
+      loadType: "barbell_total",
+      weightStepKg: 2.5,
+      defaultRepRange: "4〜6",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    lat_pulldown: {
+      id: "lat_pulldown",
+      name: "ラットプルダウン",
+      type: "machine",
+      loadType: "machine_stack",
+      weightStepKg: 2.5,
+      defaultRepRange: "8〜12",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    seated_row: {
+      id: "seated_row",
+      name: "シーテッドロー",
+      type: "machine",
+      loadType: "machine_stack",
+      weightStepKg: 2.5,
+      defaultRepRange: "8〜12",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    machine_row: {
+      id: "machine_row",
+      name: "マシンロウイング",
+      type: "machine",
+      loadType: "machine_stack",
+      weightStepKg: 2.5,
+      defaultRepRange: "10〜12",
+      allOutAllowed: true,
+      restPauseAllowed: true,
+    },
   };
 
   const COURSE_PLANS = {
@@ -163,6 +203,54 @@
           repRange: "12〜15",
           targetRir: [1, 0],
           restSeconds: 60,
+          allOutAllowed: true,
+          restPauseAllowed: true,
+        },
+      ],
+    },
+    "back_45_v0.7": {
+      courseId: "back_45_v0.7",
+      id: "back_45_v0.7",
+      name: "背中",
+      durationMinutes: 45,
+      plannedExercises: [
+        {
+          exerciseId: "deadlift",
+          plannedWeightKg: 60,
+          sets: 2,
+          repRange: "4〜6",
+          targetRir: [3, 2],
+          restSeconds: 180,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "lat_pulldown",
+          plannedWeightKg: 45,
+          sets: 3,
+          repRange: "8〜12",
+          targetRir: [2, 1, 1],
+          restSeconds: 120,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "seated_row",
+          plannedWeightKg: 40,
+          sets: 2,
+          repRange: "8〜12",
+          targetRir: [2, 1],
+          restSeconds: 120,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "machine_row",
+          plannedWeightKg: 35,
+          sets: 2,
+          repRange: "10〜12",
+          targetRir: [1, 0],
+          restSeconds: 90,
           allOutAllowed: true,
           restPauseAllowed: true,
         },
@@ -1889,10 +1977,16 @@
     }
 
     const legacyId = session?.plannedSession?.id || session?.id || "";
+    if (legacyId.includes("back")) {
+      return "back_45_v0.7";
+    }
     if (legacyId.includes("chest")) {
       return "chest_45_v0.5";
     }
     const exerciseIds = (session?.plannedSession?.plannedExercises || []).map((planned) => planned.exerciseId);
+    if (exerciseIds.some((exerciseId) => ["deadlift", "lat_pulldown", "seated_row", "machine_row"].includes(exerciseId))) {
+      return "back_45_v0.7";
+    }
     if (exerciseIds.some((exerciseId) => ["bench_press", "incline_dumbbell_fly", "dumbbell_fly", "pectoral_fly"].includes(exerciseId))) {
       return "chest_45_v0.5";
     }

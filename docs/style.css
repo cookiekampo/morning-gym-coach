@@ -560,6 +560,7 @@ h3 {
 }
 
 .coach-memo-input,
+.coach-update-input,
 .copy-fallback {
   width: 100%;
   min-height: 126px;
@@ -578,6 +579,27 @@ h3 {
   min-height: 220px;
   margin-top: 10px;
   white-space: pre;
+}
+
+.coach-update-stack,
+.coach-update-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.coach-update-preview {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
+}
+
+.coach-update-preview h4 {
+  margin: 0;
+}
+
+.warning-list {
+  color: var(--warn);
 }
 
 .sheet-backdrop {

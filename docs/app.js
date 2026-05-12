@@ -5,7 +5,7 @@
   const STORAGE_ACTIVE_KEY = "morning-gym-coach:v0.1:activeSession";
   const STORAGE_LAST_COURSE_KEY = "morning-gym-coach:v0.5:lastCourse";
   const STORAGE_BASELINE_WEIGHTS_KEY = "morning-gym-coach:v0.8:baselineWeights";
-  const APP_VERSION = "v0.9";
+  const APP_VERSION = "vNext";
   const DEFAULT_COURSE_ID = "legs_45_v0.5";
   const RIR_ZERO_WARNING = "この種目でRIR0は非推奨です。フォームが崩れていない場合のみ記録してください。";
   const LEG_EXTENSION_ALLOUT_WARNING = "まだ後続種目があります。ここでオールアウトすると後の種目に影響します。記録しますか？";
@@ -291,6 +291,10 @@
     copyMessage: "",
     markdownFallback: "",
     settingsMessage: "",
+    coachUpdateOpen: false,
+    coachUpdateRaw: "",
+    coachUpdatePreview: null,
+    coachUpdateError: "",
     summaryMessage: "",
     editingSet: null,
     selectedCourseId: DEFAULT_COURSE_ID,
@@ -1342,6 +1346,7 @@
     const memoSession = currentMemoSession();
     const memoText = memoSession?.coachMemo || "";
     const baselineList = renderBaselineWeightsSettings();
+    const coachUpdateControls = renderCoachUpdateImport();
     const memoControls = memoSession
       ? `
         <textarea id="coach-memo-input" class="coach-memo-input" rows="5" placeholder="ChatGPTの返答を貼り付け">${escapeHtml(memoText)}</textarea>
@@ -1373,6 +1378,10 @@
           <button class="button ghost" id="backup-records" type="button">記録をバックアップ</button>
           <button class="button ghost" id="restore-records" type="button">記録を復元</button>
           <input class="hidden-file-input" id="restore-file-input" type="file" accept="application/json,.json">
+          <section class="settings-section">
+            <h3>コーチ更新</h3>
+            ${coachUpdateControls}
+          </section>
           <button class="button ghost" id="restart-today" type="button">今日のトレーニングをやり直す</button>
           <button class="button warning" id="delete-today-records" type="button">今日の記録だけ削除</button>
           <section class="settings-section">
@@ -1428,6 +1437,53 @@
     }).join("");
 
     return `<div class="baseline-list">${rows}</div>`;
+  }
+
+  function renderCoachUpdateImport() {
+    if (!state.coachUpdateOpen) {
+      return '<button class="button ghost" id="open-coach-update" type="button">コーチ更新を貼り付け</button>';
+    }
+
+    const preview = state.coachUpdatePreview ? renderCoachUpdatePreview(state.coachUpdatePreview) : "";
+    const error = state.coachUpdateError ? `<p class="helper-text danger-text">${state.coachUpdateError}</p>` : "";
+
+    return `
+      <div class="coach-update-stack">
+        <textarea id="coach-update-input" class="coach-update-input" rows="8" placeholder='{"type":"coach_update","version":"1.0",...}'>${escapeHtml(state.coachUpdateRaw)}</textarea>
+        <div class="compact-actions">
+          <button class="button" id="preview-coach-update" type="button">内容を確認</button>
+          <button class="button ghost" id="cancel-coach-update" type="button">キャンセル</button>
+        </div>
+        ${error}
+        ${preview}
+      </div>
+    `;
+  }
+
+  function renderCoachUpdatePreview(preview) {
+    const changes = preview.baselineUpdates.length
+      ? preview.baselineUpdates.map((update) => `
+        <li>${EXERCISES[update.exerciseId].name}: ${formatWeight(update.currentWeight, EXERCISES[update.exerciseId].loadType)} → ${formatWeight(update.weight, EXERCISES[update.exerciseId].loadType)}${update.rounded ? "（丸め）" : ""}</li>
+      `).join("")
+      : '<li class="muted">基準重量の変更なし</li>';
+    const ignored = preview.warnings.length
+      ? `<ul class="compact-list warning-list">${preview.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
+      : "";
+    const memo = preview.coachMemo ? '<li>コーチメモを更新</li>' : "";
+    const summary = preview.summary ? `<p class="helper-text">${escapeHtml(preview.summary)}</p>` : "";
+
+    return `
+      <div class="coach-update-preview">
+        <h4>変更プレビュー</h4>
+        ${summary}
+        <ul class="summary-list">${changes}${memo}</ul>
+        ${ignored}
+        <div class="compact-actions">
+          <button class="button primary" id="apply-coach-update" type="button">反映する</button>
+          <button class="button ghost" id="clear-coach-update" type="button">キャンセル</button>
+        </div>
+      </div>
+    `;
   }
 
   function wireGlobalControls() {
@@ -1499,6 +1555,49 @@
     if (restoreButton && restoreInput) {
       restoreButton.addEventListener("click", () => restoreInput.click());
       restoreInput.addEventListener("change", restoreRecordsFromFile);
+    }
+
+    const openCoachUpdateButton = document.getElementById("open-coach-update");
+    if (openCoachUpdateButton) {
+      openCoachUpdateButton.addEventListener("click", () => {
+        state.coachUpdateOpen = true;
+        state.coachUpdateError = "";
+        state.coachUpdatePreview = null;
+        render();
+      });
+    }
+
+    const coachUpdateInput = document.getElementById("coach-update-input");
+    if (coachUpdateInput) {
+      coachUpdateInput.addEventListener("input", (event) => {
+        state.coachUpdateRaw = event.target.value;
+      });
+    }
+
+    const previewCoachUpdateButton = document.getElementById("preview-coach-update");
+    if (previewCoachUpdateButton) {
+      previewCoachUpdateButton.addEventListener("click", previewCoachUpdate);
+    }
+
+    const cancelCoachUpdateButton = document.getElementById("cancel-coach-update");
+    if (cancelCoachUpdateButton) {
+      cancelCoachUpdateButton.addEventListener("click", () => {
+        closeCoachUpdateImport();
+        render();
+      });
+    }
+
+    const clearCoachUpdateButton = document.getElementById("clear-coach-update");
+    if (clearCoachUpdateButton) {
+      clearCoachUpdateButton.addEventListener("click", () => {
+        closeCoachUpdateImport();
+        render();
+      });
+    }
+
+    const applyCoachUpdateButton = document.getElementById("apply-coach-update");
+    if (applyCoachUpdateButton) {
+      applyCoachUpdateButton.addEventListener("click", applyCoachUpdate);
     }
 
     const restartButton = document.getElementById("restart-today");
@@ -1830,6 +1929,160 @@
       render();
     };
     reader.readAsText(file);
+  }
+
+  function previewCoachUpdate() {
+    try {
+      const payload = parseCoachUpdateJson(state.coachUpdateRaw);
+      const preview = validateCoachUpdate(payload);
+      if (!preview.baselineUpdates.length && !preview.coachMemo) {
+        state.coachUpdatePreview = null;
+        state.coachUpdateError = "反映できる基準重量またはコーチメモがありません。";
+        render();
+        return;
+      }
+      state.coachUpdatePreview = preview;
+      state.coachUpdateError = "";
+      state.settingsMessage = "";
+      render();
+    } catch (error) {
+      console.warn("Coach update preview failed", error);
+      state.coachUpdatePreview = null;
+      state.coachUpdateError = "不正JSONまたは対応していない形式です。";
+      render();
+    }
+  }
+
+  function parseCoachUpdateJson(raw) {
+    const trimmed = String(raw || "").trim();
+    if (!trimmed) {
+      throw new Error("Empty coach update");
+    }
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    return JSON.parse(fenced ? fenced[1] : trimmed);
+  }
+
+  function validateCoachUpdate(payload) {
+    if (!payload || typeof payload !== "object" || payload.type !== "coach_update") {
+      throw new Error("Unsupported coach update type");
+    }
+
+    const warnings = [];
+    if (payload.courseId && !COURSE_PLANS[payload.courseId]) {
+      warnings.push(`未対応コースIDを無視: ${payload.courseId}`);
+    }
+
+    const baselineWeights = payload.baselineWeights && typeof payload.baselineWeights === "object" && !Array.isArray(payload.baselineWeights)
+      ? payload.baselineWeights
+      : {};
+    const existing = loadBaselineWeights();
+    const baselineUpdates = [];
+
+    Object.entries(baselineWeights).forEach(([exerciseId, rawWeight]) => {
+      const exercise = EXERCISES[exerciseId];
+      if (!exercise) {
+        warnings.push(`未対応種目を無視: ${exerciseId}`);
+        return;
+      }
+
+      const numericWeight = Number(rawWeight);
+      if (!Number.isFinite(numericWeight)) {
+        warnings.push(`${exercise.name}: 数値ではない重量を無視`);
+        return;
+      }
+      if (numericWeight <= 0) {
+        warnings.push(`${exercise.name}: 0以下の重量を拒否`);
+        return;
+      }
+
+      const roundedWeight = roundToWeightStep(numericWeight, exercise.weightStepKg);
+      if (roundedWeight <= 0) {
+        warnings.push(`${exercise.name}: 丸め後に0以下の重量を拒否`);
+        return;
+      }
+
+      baselineUpdates.push({
+        exerciseId,
+        weight: roundedWeight,
+        requestedWeight: numericWeight,
+        rounded: roundedWeight !== numericWeight,
+        currentWeight: Number(existing[exerciseId]) || defaultWeightForExercise(exerciseId) || roundedWeight,
+      });
+    });
+
+    return {
+      type: payload.type,
+      version: String(payload.version || ""),
+      courseId: payload.courseId || "",
+      summary: typeof payload.summary === "string" ? payload.summary.trim() : "",
+      baselineUpdates,
+      coachMemo: typeof payload.coachMemo === "string" ? payload.coachMemo.trim() : "",
+      warnings,
+    };
+  }
+
+  function roundToWeightStep(weight, step) {
+    const safeStep = Number(step) || 2.5;
+    return Number((Math.round(weight / safeStep) * safeStep).toFixed(2));
+  }
+
+  function defaultWeightForExercise(exerciseId) {
+    for (const course of Object.values(COURSE_PLANS)) {
+      const planned = course.plannedExercises.find((item) => item.exerciseId === exerciseId);
+      if (planned) {
+        return planned.plannedWeightKg;
+      }
+    }
+    return null;
+  }
+
+  function applyCoachUpdate() {
+    const preview = state.coachUpdatePreview;
+    if (!preview) {
+      return;
+    }
+
+    const baselineWeights = loadBaselineWeights();
+    preview.baselineUpdates.forEach((update) => {
+      baselineWeights[update.exerciseId] = update.weight;
+    });
+    saveBaselineWeights(baselineWeights);
+
+    let memoSaved = false;
+    if (preview.coachMemo) {
+      memoSaved = saveCoachMemoFromUpdate(preview.coachMemo);
+    }
+
+    state.settingsMessage = memoSaved || !preview.coachMemo
+      ? "コーチ更新を反映しました"
+      : "基準重量を反映しました。コーチメモの保存先がありません。";
+    closeCoachUpdateImport({ keepMessage: true });
+    resetWorkingMenu();
+    render();
+  }
+
+  function saveCoachMemoFromUpdate(coachMemo) {
+    const session = currentMemoSession();
+    if (!session) {
+      return false;
+    }
+    const normalized = normalizeLoadedSession(session);
+    normalized.coachMemo = coachMemo;
+    if (state.session && state.session.id === normalized.id) {
+      state.session = normalized;
+    }
+    saveSession(normalized);
+    return true;
+  }
+
+  function closeCoachUpdateImport({ keepMessage = false } = {}) {
+    state.coachUpdateOpen = false;
+    state.coachUpdateRaw = "";
+    state.coachUpdatePreview = null;
+    state.coachUpdateError = "";
+    if (!keepMessage) {
+      state.settingsMessage = "";
+    }
   }
 
   function isValidBackupPayload(payload) {
@@ -2908,6 +3161,7 @@
     lines.push("");
     lines.push("## ChatGPTへの依頼");
     lines.push("次回の重量、種目順、オールアウト種目、必要なら推定1RMを見てください。");
+    lines.push("次回方針を出してください。最後に、アプリ反映用の coach_update JSON をコードブロックで出してください。");
     return lines.join("\n");
   }
 

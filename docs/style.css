@@ -433,6 +433,21 @@ h3 {
   font-size: 0.92rem;
 }
 
+.timer-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.timer-actions .button {
+  min-height: 48px;
+  font-size: 0.9rem;
+}
+
+.timer-primary {
+  grid-column: 1 / -1;
+}
+
 .mini-button {
   width: auto;
   min-height: 36px;
@@ -770,6 +785,10 @@ h3 {
   }
 
   .compact-actions.three {
+    grid-template-columns: 1fr;
+  }
+
+  .timer-actions {
     grid-template-columns: 1fr;
   }
 

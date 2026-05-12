@@ -5,7 +5,7 @@
   const STORAGE_ACTIVE_KEY = "morning-gym-coach:v0.1:activeSession";
   const STORAGE_LAST_COURSE_KEY = "morning-gym-coach:v0.5:lastCourse";
   const STORAGE_BASELINE_WEIGHTS_KEY = "morning-gym-coach:v0.8:baselineWeights";
-  const APP_VERSION = "v0.8";
+  const APP_VERSION = "v0.9";
   const DEFAULT_COURSE_ID = "legs_45_v0.5";
   const RIR_ZERO_WARNING = "この種目でRIR0は非推奨です。フォームが崩れていない場合のみ記録してください。";
   const LEG_EXTENSION_ALLOUT_WARNING = "まだ後続種目があります。ここでオールアウトすると後の種目に影響します。記録しますか？";
@@ -273,9 +273,18 @@
       actualWeightKg: "",
       reps: "",
     },
+    warmupMode: false,
+    warmupDraft: {
+      actualWeightKg: "",
+      reps: "",
+    },
+    warmupSelectedRir: null,
     timerId: null,
     timerTotal: 0,
+    timerPlannedSeconds: 0,
     timerRemaining: 0,
+    timerStartedAt: null,
+    timerSetIndex: null,
     restFinished: false,
     restNotified: false,
     coachNote: "",
@@ -490,11 +499,9 @@
     const isExtraSet = setNumber > planned.sets;
     const targetRir = targetRirFor(planned, setNumber);
     const lastSet = lastPerformedSet();
-    const rirButtons = RIR_OPTIONS.map((rir) => {
-      const disabled = rir === "0" && state.session.allOutBanned;
-      const selected = state.selectedRir === rir ? " selected" : "";
-      return `<button class="rir-button${selected}" type="button" data-rir="${rir}" ${disabled ? "disabled" : ""}>${rir}</button>`;
-    }).join("");
+    const inputBody = state.warmupMode
+      ? renderWarmupInput(planned, exercise)
+      : renderWorkSetInput(planned, exercise, setNumber, isExtraSet, targetRir, lastSet);
 
     app.innerHTML = `
       <section class="screen">
@@ -502,10 +509,26 @@
         <header class="screen-header">
           <div>
             <p class="eyebrow">${state.session.plannedSession.name} / ${state.session.plannedSession.durationMinutes}分</p>
-            <h1>${exercise.name} ${isExtraSet ? "追加セット" : `${setNumber}セット目`}</h1>
+            <h1>${exercise.name} ${state.warmupMode ? "ウォームアップ" : isExtraSet ? "追加セット" : `${setNumber}セット目`}</h1>
           </div>
         </header>
+        ${inputBody}
+      </section>
+      ${renderOverlayPanels()}
+    `;
 
+    wireInputControls();
+    wireGlobalControls();
+  }
+
+  function renderWorkSetInput(planned, exercise, setNumber, isExtraSet, targetRir, lastSet) {
+    const rirButtons = RIR_OPTIONS.map((rir) => {
+      const disabled = rir === "0" && state.session.allOutBanned;
+      const selected = state.selectedRir === rir ? " selected" : "";
+      return `<button class="rir-button${selected}" type="button" data-rir="${rir}" ${disabled ? "disabled" : ""}>${rir}</button>`;
+    }).join("");
+
+    return `
         <section class="panel">
           <h2>予定</h2>
           <dl class="facts">
@@ -540,30 +563,126 @@
 
         <div class="action-row">
           <button class="button primary" id="record-set" type="button">記録して休憩</button>
+          <button class="button ghost" id="open-warmup" type="button">ウォームアップを追加</button>
           <button class="button ghost" id="defer-exercise" type="button">この種目を後回し</button>
           <button class="button warning" id="skip-exercise" type="button">今日はこの種目をスキップ</button>
           <button class="button danger" id="pain-button" type="button">痛みあり</button>
         </div>
-      </section>
-      ${renderOverlayPanels()}
     `;
+  }
 
-    document.getElementById("actual-weight").addEventListener("input", (event) => {
-      state.draft.actualWeightKg = event.target.value;
-    });
-    document.getElementById("actual-reps").addEventListener("input", (event) => {
-      state.draft.reps = event.target.value;
-    });
+  function renderWarmupInput(planned, exercise) {
+    ensureWarmupDraft(planned);
+    const rirButtons = RIR_OPTIONS.map((rir) => {
+      const disabled = rir === "0" && state.session.allOutBanned;
+      const selected = state.warmupSelectedRir === rir ? " selected" : "";
+      return `<button class="rir-button${selected}" type="button" data-warmup-rir="${rir}" ${disabled ? "disabled" : ""}>${rir}</button>`;
+    }).join("");
+
+    return `
+        <section class="mini-panel">
+          <h3>ウォームアップ</h3>
+          <p class="helper-text">本番セット数にはカウントしません。RIRは未入力でも保存できます。</p>
+        </section>
+        <section class="panel">
+          <h2>実際</h2>
+          <div class="input-grid">
+            <div class="field">
+              <label for="warmup-weight">重量 kg</label>
+              <input id="warmup-weight" type="number" inputmode="decimal" min="0" step="${exercise.weightStepKg}" value="${state.warmupDraft.actualWeightKg}">
+            </div>
+            <div class="field">
+              <label for="warmup-reps">回数</label>
+              <input id="warmup-reps" type="number" inputmode="numeric" min="0" step="1" value="${state.warmupDraft.reps}">
+            </div>
+          </div>
+          <h3>RIR（任意）</h3>
+          <div class="rir-grid">${rirButtons}</div>
+          <p class="helper-text">未選択のままでも記録できます。</p>
+        </section>
+        <div class="action-row">
+          <button class="button primary" id="record-warmup" type="button">ウォームアップを記録</button>
+          <button class="button ghost" id="close-warmup" type="button">本番セットへ</button>
+        </div>
+    `;
+  }
+
+  function wireInputControls() {
+    const actualWeight = document.getElementById("actual-weight");
+    if (actualWeight) {
+      actualWeight.addEventListener("input", (event) => {
+        state.draft.actualWeightKg = event.target.value;
+      });
+    }
+    const actualReps = document.getElementById("actual-reps");
+    if (actualReps) {
+      actualReps.addEventListener("input", (event) => {
+        state.draft.reps = event.target.value;
+      });
+    }
     document.querySelectorAll("[data-rir]").forEach((button) => {
       button.addEventListener("click", () => {
         state.selectedRir = button.dataset.rir;
         renderInput();
       });
     });
-    document.getElementById("record-set").addEventListener("click", recordSet);
-    document.getElementById("defer-exercise").addEventListener("click", deferCurrentExercise);
-    document.getElementById("skip-exercise").addEventListener("click", skipCurrentExercise);
-    document.getElementById("pain-button").addEventListener("click", handlePain);
+    document.querySelectorAll("[data-warmup-rir]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.warmupSelectedRir = button.dataset.warmupRir;
+        renderInput();
+      });
+    });
+
+    const warmupWeight = document.getElementById("warmup-weight");
+    if (warmupWeight) {
+      warmupWeight.addEventListener("input", (event) => {
+        state.warmupDraft.actualWeightKg = event.target.value;
+      });
+    }
+    const warmupReps = document.getElementById("warmup-reps");
+    if (warmupReps) {
+      warmupReps.addEventListener("input", (event) => {
+        state.warmupDraft.reps = event.target.value;
+      });
+    }
+
+    const openWarmupButton = document.getElementById("open-warmup");
+    if (openWarmupButton) {
+      openWarmupButton.addEventListener("click", () => {
+        state.warmupMode = true;
+        ensureWarmupDraft(currentPlanned());
+        renderInput();
+      });
+    }
+    const closeWarmupButton = document.getElementById("close-warmup");
+    if (closeWarmupButton) {
+      closeWarmupButton.addEventListener("click", () => {
+        state.warmupMode = false;
+        resetWarmupDraft();
+        renderInput();
+      });
+    }
+    const recordWarmupButton = document.getElementById("record-warmup");
+    if (recordWarmupButton) {
+      recordWarmupButton.addEventListener("click", recordWarmupSet);
+    }
+
+    const recordSetButton = document.getElementById("record-set");
+    if (recordSetButton) {
+      recordSetButton.addEventListener("click", recordSet);
+    }
+    const deferButton = document.getElementById("defer-exercise");
+    if (deferButton) {
+      deferButton.addEventListener("click", deferCurrentExercise);
+    }
+    const skipButton = document.getElementById("skip-exercise");
+    if (skipButton) {
+      skipButton.addEventListener("click", skipCurrentExercise);
+    }
+    const painButton = document.getElementById("pain-button");
+    if (painButton) {
+      painButton.addEventListener("click", handlePain);
+    }
 
     const editButton = document.getElementById("edit-last-set");
     if (editButton) {
@@ -574,14 +693,13 @@
     if (deleteButton) {
       deleteButton.addEventListener("click", deleteLastSet);
     }
-    wireGlobalControls();
   }
 
   function renderLastSetPanel(set) {
     const exercise = EXERCISES[set.exerciseId];
     const label = set.painFlag
       ? `${exercise.name} 痛みあり`
-      : `${exercise.name} ${set.isExtraSet ? "追加セット" : `${set.setNumber}セット目`}`;
+      : `${exercise.name} ${set.isWarmup ? "ウォームアップ" : set.isExtraSet ? "追加セット" : `${set.setNumber}セット目`}`;
     return `
       <section class="mini-panel">
         <h3>直前: ${label}</h3>
@@ -628,7 +746,7 @@
 
     for (let index = sessions.length - 1; index >= 0; index -= 1) {
       const session = normalizeLoadedSession(sessions[index]);
-      const sets = session.performedSets.filter((set) => set.exerciseId === exerciseId);
+      const sets = session.performedSets.filter((set) => set.exerciseId === exerciseId && !set.isWarmup);
       if (sets.length) {
         return { session, sets };
       }
@@ -665,23 +783,37 @@
           ${state.restFinished ? '<p class="notice-pill">休憩終了</p>' : ""}
           <div class="next-lines">${nextLines}</div>
         </div>
-        <div class="compact-actions ${extraButton || endExerciseButton ? "three" : ""}">
-          <button class="button" id="add-rest" type="button">+30秒</button>
-          <button class="button primary" id="rest-primary" type="button">${info.primaryLabel}</button>
+        <div class="timer-actions">
+          <button class="button ghost" id="subtract-rest" type="button">-30秒</button>
+          <button class="button ghost" id="add-rest" type="button">+30秒</button>
+          <button class="button warning" id="finish-rest-now" type="button">休憩終了</button>
+          <button class="button ghost" id="reset-rest" type="button">規定秒数に戻す</button>
+          <button class="button primary timer-primary" id="rest-primary" type="button">${info.primaryLabel}</button>
           ${extraButton || endExerciseButton}
         </div>
       </section>
       ${renderOverlayPanels()}
     `;
 
+    document.getElementById("subtract-rest").addEventListener("click", () => {
+      state.timerRemaining = Math.max(0, state.timerRemaining - 30);
+      if (state.timerRemaining === 0) {
+        finishRestTimer({ manual: true });
+        return;
+      }
+      state.restFinished = false;
+      renderRest();
+      startTimerInterval();
+    });
     document.getElementById("add-rest").addEventListener("click", () => {
-      state.timerTotal += 30;
       state.timerRemaining += 30;
       state.restFinished = false;
       state.restNotified = false;
       renderRest();
       startTimerInterval();
     });
+    document.getElementById("finish-rest-now").addEventListener("click", () => finishRestTimer({ manual: true }));
+    document.getElementById("reset-rest").addEventListener("click", resetRestTimerToPlanned);
     document.getElementById("rest-primary").addEventListener("click", handleTransitionPrimaryFromRest);
 
     const addExtraButton = document.getElementById("add-extra-set");
@@ -754,28 +886,36 @@
         .map((set, index) => ({ set, index }))
         .filter((entry) => entry.set.exerciseId === planned.exerciseId);
       const sets = setEntries.map((entry) => entry.set);
+      const warmupEntries = setEntries.filter((entry) => entry.set.isWarmup);
+      const workEntries = setEntries.filter((entry) => !entry.set.isWarmup);
+      const workSets = workEntries.map((entry) => entry.set);
       const status = session.exerciseStatuses[planned.exerciseId] || "pending";
       const plannedRows = Array.from({ length: planned.sets }, (_, index) => {
         const setNumber = index + 1;
         return `<li>${setNumber}. ${formatWeight(planned.plannedWeightKg, exercise.loadType)} / ${formatRepRange(planned, exercise)} / RIR${targetRirFor(planned, setNumber)}</li>`;
       }).join("");
-      const actualRows = status === "skipped"
+      const warmupRows = warmupEntries.length
+        ? warmupEntries.map((entry) => renderPerformedSetRow(entry.set, exercise, entry.index)).join("")
+        : '<li class="muted">なし</li>';
+      const actualRows = status === "skipped" && !workEntries.length
         ? '<li class="muted">スキップ</li>'
-        : setEntries.length
-        ? setEntries.map((entry) => renderPerformedSetRow(entry.set, exercise, entry.index)).join("")
+        : workEntries.length
+        ? workEntries.map((entry) => renderPerformedSetRow(entry.set, exercise, entry.index)).join("")
         : '<li class="muted">記録なし</li>';
       const notes = summaryNotes(planned, exercise, sets, status);
-      const baselineButton = renderBaselineSaveButton(planned, exercise, sets);
+      const baselineButton = renderBaselineSaveButton(planned, exercise, workSets);
 
       return `
         <section class="summary-card">
           <h2>${exercise.name}</h2>
           <h3 class="summary-section-title">予定セット</h3>
           <ul class="summary-list">${plannedRows}</ul>
-          <h3 class="summary-section-title">実績セット</h3>
+          <h3 class="summary-section-title">ウォームアップ</h3>
+          <ul class="summary-list">${warmupRows}</ul>
+          <h3 class="summary-section-title">本番セット</h3>
           <ul class="summary-list">${actualRows}</ul>
           ${notes ? `<p class="summary-note">${notes}</p>` : ""}
-          <p class="judge">判定: ${judgeExercise(planned, exercise, sets)}</p>
+          <p class="judge">判定: ${judgeExercise(planned, exercise, workSets)}</p>
           ${baselineButton}
         </section>
       `;
@@ -1435,13 +1575,17 @@
       rir,
       rpe: rirToRpe(rir),
       restSeconds: planned.restSeconds,
+      plannedRestSeconds: planned.restSeconds,
+      actualRestSeconds: null,
       painFlag: false,
       isAllOut: rir === "0",
+      isWarmup: false,
       isExtraSet,
       note: rirJudgment(rir),
     };
 
     session.performedSets.push(performedSet);
+    const setIndex = session.performedSets.length - 1;
     markExerciseStarted(planned.exerciseId);
     updateExerciseStatusAfterSet(planned.exerciseId, rir);
     state.coachNote = rir === "0" ? "この種目は終了推奨。" : rirJudgment(rir);
@@ -1454,7 +1598,65 @@
     }
 
     saveSession(session);
-    startRest(performedSet.restSeconds);
+    startRest(performedSet.plannedRestSeconds, setIndex);
+  }
+
+  function recordWarmupSet() {
+    const session = state.session;
+    const planned = currentPlanned();
+    const exercise = EXERCISES[planned.exerciseId];
+    const actualWeightKg = Number(state.warmupDraft.actualWeightKg);
+    const reps = Number.parseInt(state.warmupDraft.reps, 10);
+    const rir = state.warmupSelectedRir;
+
+    if (!Number.isFinite(actualWeightKg) || actualWeightKg <= 0) {
+      window.alert("重量を入力してください。");
+      return;
+    }
+
+    if (!Number.isInteger(reps) || reps <= 0) {
+      window.alert("回数を入力してください。");
+      return;
+    }
+
+    if (rir === "0" && session.allOutBanned) {
+      window.alert("痛みあり後はRIR0を記録できません。");
+      return;
+    }
+
+    if (rir === "0" && !planned.allOutAllowed && !window.confirm(RIR_ZERO_WARNING)) {
+      return;
+    }
+
+    const plannedRestSeconds = warmupRestSeconds(exercise);
+    const performedSet = {
+      sessionId: session.id,
+      exerciseId: planned.exerciseId,
+      setNumber: warmupSetsFor(planned.exerciseId).length + 1,
+      plannedWeightKg: planned.plannedWeightKg,
+      actualWeightKg,
+      reps,
+      rir,
+      rpe: rir ? rirToRpe(rir) : null,
+      restSeconds: plannedRestSeconds,
+      plannedRestSeconds,
+      actualRestSeconds: null,
+      painFlag: false,
+      isAllOut: rir === "0",
+      isWarmup: true,
+      isExtraSet: false,
+      note: rir ? rirJudgment(rir) : "",
+    };
+
+    session.performedSets.push(performedSet);
+    const setIndex = session.performedSets.length - 1;
+    markExerciseStarted(planned.exerciseId);
+    state.coachNote = "ウォームアップ記録。";
+    state.warmupMode = false;
+    resetWarmupDraft();
+    resetDraft();
+    saveSession(session);
+    startRest(plannedRestSeconds, setIndex);
   }
 
   function handlePain() {
@@ -1477,8 +1679,11 @@
       rir: null,
       rpe: null,
       restSeconds: 0,
+      plannedRestSeconds: 0,
+      actualRestSeconds: null,
       painFlag: true,
       isAllOut: false,
+      isWarmup: false,
       isExtraSet: session.currentSetNumber > planned.sets,
       note: "痛みあり。種目終了。",
     });
@@ -1507,7 +1712,7 @@
     rebuildSessionProgress();
     const exerciseIndex = state.session.activeOrder.indexOf(set.exerciseId);
     state.session.currentExerciseIndex = Math.max(0, exerciseIndex);
-    state.session.currentSetNumber = set.setNumber;
+    state.session.currentSetNumber = set.isWarmup ? nextSetNumberForExercise(set.exerciseId) : set.setNumber;
     saveSession(state.session);
 
     const planned = currentPlanned();
@@ -1518,6 +1723,14 @@
       reps: set.reps || "",
     };
     state.selectedRir = set.rir;
+    state.warmupMode = Boolean(set.isWarmup);
+    if (set.isWarmup) {
+      state.warmupDraft = {
+        actualWeightKg: set.actualWeightKg || planned.plannedWeightKg,
+        reps: set.reps || "",
+      };
+      state.warmupSelectedRir = set.rir;
+    }
     setView("input");
   }
 
@@ -1534,7 +1747,7 @@
     rebuildSessionProgress();
     const exerciseIndex = state.session.activeOrder.indexOf(set.exerciseId);
     state.session.currentExerciseIndex = Math.max(0, exerciseIndex);
-    state.session.currentSetNumber = set.setNumber;
+    state.session.currentSetNumber = set.isWarmup ? nextSetNumberForExercise(set.exerciseId) : set.setNumber;
     saveSession(state.session);
     resetDraft();
     setView("input");
@@ -1797,9 +2010,12 @@
     completeSession();
   }
 
-  function startRest(seconds) {
+  function startRest(seconds, setIndex = null) {
     state.timerTotal = seconds;
+    state.timerPlannedSeconds = seconds;
     state.timerRemaining = seconds;
+    state.timerStartedAt = Date.now();
+    state.timerSetIndex = setIndex;
     state.restFinished = false;
     state.restNotified = false;
     state.view = "rest";
@@ -1812,17 +2028,20 @@
     state.timerId = window.setInterval(() => {
       state.timerRemaining -= 1;
       if (state.timerRemaining <= 0) {
-        finishRestTimer();
+        finishRestTimer({ manual: false });
         return;
       }
       renderRest();
     }, 1000);
   }
 
-  function finishRestTimer() {
+  function finishRestTimer({ manual = false } = {}) {
     stopTimer();
     state.timerRemaining = 0;
     state.restFinished = true;
+    if (manual) {
+      updateActualRestSeconds();
+    }
     renderRest();
     notifyRestFinished();
   }
@@ -1832,6 +2051,44 @@
       window.clearInterval(state.timerId);
       state.timerId = null;
     }
+  }
+
+  function resetRestTimerToPlanned() {
+    state.timerTotal = state.timerPlannedSeconds;
+    state.timerRemaining = state.timerPlannedSeconds;
+    state.timerStartedAt = Date.now();
+    state.restFinished = false;
+    state.restNotified = false;
+    clearActualRestSeconds();
+    renderRest();
+    startTimerInterval();
+  }
+
+  function updateActualRestSeconds() {
+    if (!state.session || state.timerSetIndex === null || !state.timerStartedAt) {
+      return;
+    }
+    const set = state.session.performedSets[state.timerSetIndex];
+    if (!set || set.actualRestSeconds !== null && set.actualRestSeconds !== undefined) {
+      return;
+    }
+    set.actualRestSeconds = Math.max(0, Math.round((Date.now() - state.timerStartedAt) / 1000));
+    set.plannedRestSeconds = set.plannedRestSeconds ?? set.restSeconds ?? state.timerPlannedSeconds;
+    state.session.performedSets[state.timerSetIndex] = set;
+    saveSession(state.session);
+  }
+
+  function clearActualRestSeconds() {
+    if (!state.session || state.timerSetIndex === null) {
+      return;
+    }
+    const set = state.session.performedSets[state.timerSetIndex];
+    if (!set) {
+      return;
+    }
+    set.actualRestSeconds = null;
+    state.session.performedSets[state.timerSetIndex] = set;
+    saveSession(state.session);
   }
 
   function notifyRestFinished() {
@@ -1876,6 +2133,7 @@
   }
 
   function handleTransitionPrimaryFromRest() {
+    updateActualRestSeconds();
     stopTimer();
     const info = transitionInfo();
     if (!info) {
@@ -1900,8 +2158,9 @@
   }
 
   function addExtraSetFromLast() {
+    updateActualRestSeconds();
     const last = lastPerformedSet();
-    if (!last || last.painFlag) {
+    if (!last || last.painFlag || last.isWarmup) {
       return;
     }
 
@@ -1911,7 +2170,7 @@
     }
 
     state.session.currentExerciseIndex = exerciseIndex;
-    state.session.currentSetNumber = performedSetsFor(last.exerciseId).filter((set) => !set.painFlag).length + 1;
+    state.session.currentSetNumber = workSetsFor(last.exerciseId).filter((set) => !set.painFlag).length + 1;
     state.coachNote = "追加セット。フォーム優先。";
     resetDraft();
     saveSession(state.session);
@@ -1919,6 +2178,7 @@
   }
 
   function endExerciseFromRest() {
+    updateActualRestSeconds();
     stopTimer();
     const last = lastPerformedSet();
     if (!last) {
@@ -2051,9 +2311,23 @@
     const completedPlanned = plannedById(last.exerciseId, state.session.plannedSession.plannedExercises);
     const completedExercise = EXERCISES[last.exerciseId];
     const nextPlanned = currentPlanned();
-    const regularCompleted = performedSetsFor(last.exerciseId).filter((set) => !set.painFlag && !set.isExtraSet).length;
-    const canAddExtra = !last.painFlag && regularCompleted >= completedPlanned.sets;
+    const regularCompleted = performedSetsFor(last.exerciseId).filter((set) => !set.painFlag && !set.isExtraSet && !set.isWarmup).length;
+    const canAddExtra = !last.painFlag && !last.isWarmup && regularCompleted >= completedPlanned.sets;
     const endRecommended = last.rir === "0";
+
+    if (last.isWarmup) {
+      return {
+        kind: "warmup",
+        title: "本番セット",
+        eyebrow: `${completedExercise.name} ウォームアップ完了`,
+        primaryLabel: "本番セットへ",
+        planned: completedPlanned,
+        exercise: completedExercise,
+        setNumber: state.session.currentSetNumber,
+        canAddExtra: false,
+        endRecommended: false,
+      };
+    }
 
     if (nextPlanned && nextPlanned.exerciseId === last.exerciseId) {
       const nextExercise = EXERCISES[nextPlanned.exerciseId];
@@ -2105,6 +2379,14 @@
         <p>予定セット完了。</p>
         <p>まとめを確認。</p>
         <p>${info.endRecommended ? "この種目は終了推奨。" : "追加も選べます。"}</p>
+      `;
+    }
+
+    if (info.kind === "warmup") {
+      return `
+        <p>ウォームアップ完了。</p>
+        <p>${formatWeight(info.planned.plannedWeightKg, info.exercise.loadType)} / ${formatRepRange(info.planned, info.exercise)}。</p>
+        <p>本番セットへ。</p>
       `;
     }
 
@@ -2202,7 +2484,7 @@
 
   function nextSetNumberForExercise(exerciseId) {
     const planned = plannedById(exerciseId, state.session.plannedSession.plannedExercises);
-    const completedRegularSets = performedSetsFor(exerciseId).filter((set) => !set.painFlag && !set.isExtraSet).length;
+    const completedRegularSets = performedSetsFor(exerciseId).filter((set) => !set.painFlag && !set.isExtraSet && !set.isWarmup).length;
     return Math.min(completedRegularSets + 1, planned.sets);
   }
 
@@ -2218,7 +2500,7 @@
 
   function updateExerciseStatusAfterSet(exerciseId, rir) {
     const planned = plannedById(exerciseId, state.session.plannedSession.plannedExercises);
-    const regularSets = performedSetsFor(exerciseId).filter((set) => !set.painFlag && !set.isExtraSet);
+    const regularSets = performedSetsFor(exerciseId).filter((set) => !set.painFlag && !set.isExtraSet && !set.isWarmup);
     if (rir === "0" || regularSets.length >= planned.sets) {
       state.session.exerciseStatuses[exerciseId] = "completed";
       return;
@@ -2254,6 +2536,12 @@
     state.session.performedSets.forEach((set) => {
       if (!state.session.actualOrder.includes(set.exerciseId)) {
         state.session.actualOrder.push(set.exerciseId);
+      }
+      if (set.isWarmup) {
+        if (state.session.exerciseStatuses[set.exerciseId] === "pending") {
+          state.session.exerciseStatuses[set.exerciseId] = "in_progress";
+        }
+        return;
       }
       if (set.painFlag) {
         state.session.exerciseStatuses[set.exerciseId] = "completed";
@@ -2312,6 +2600,17 @@
     state.selectedRir = null;
   }
 
+  function ensureWarmupDraft(planned) {
+    if (state.warmupDraft.actualWeightKg !== "" || state.warmupDraft.reps !== "") {
+      return;
+    }
+    state.warmupDraft = {
+      actualWeightKg: planned?.plannedWeightKg || "",
+      reps: "",
+    };
+    state.warmupSelectedRir = null;
+  }
+
   function resetDraft() {
     state.draftKey = "";
     state.draft = {
@@ -2320,6 +2619,15 @@
       reps: "",
     };
     state.selectedRir = null;
+    state.warmupMode = false;
+  }
+
+  function resetWarmupDraft() {
+    state.warmupDraft = {
+      actualWeightKg: "",
+      reps: "",
+    };
+    state.warmupSelectedRir = null;
   }
 
   function makeDraftKey(planned) {
@@ -2338,8 +2646,26 @@
   }
 
   function lastSetForExercise(exerciseId) {
-    const sets = performedSetsFor(exerciseId).filter((set) => !set.painFlag);
+    const sets = performedSetsFor(exerciseId).filter((set) => !set.painFlag && !set.isWarmup);
     return sets[sets.length - 1] || null;
+  }
+
+  function warmupSetsFor(exerciseId) {
+    return performedSetsFor(exerciseId).filter((set) => set.isWarmup);
+  }
+
+  function workSetsFor(exerciseId) {
+    return performedSetsFor(exerciseId).filter((set) => !set.isWarmup);
+  }
+
+  function warmupRestSeconds(exercise) {
+    if (exercise.type === "heavy_compound") {
+      return 90;
+    }
+    if (exercise.type === "machine") {
+      return 60;
+    }
+    return 45;
   }
 
   function recalculateAllOutBan() {
@@ -2458,7 +2784,10 @@
       ...(session.exerciseStatuses || {}),
     };
     session.performedSets = (session.performedSets || []).map((set) => ({
+      isWarmup: false,
       isExtraSet: false,
+      plannedRestSeconds: set.plannedRestSeconds ?? set.restSeconds ?? null,
+      actualRestSeconds: set.actualRestSeconds ?? null,
       ...set,
     }));
     session.coachMemo = session.coachMemo || "";
@@ -2545,14 +2874,24 @@
     session.plannedSession.plannedExercises.forEach((planned) => {
       const exercise = EXERCISES[planned.exerciseId];
       const sets = session.performedSets.filter((set) => set.exerciseId === planned.exerciseId);
+      const warmupSets = sets.filter((set) => set.isWarmup);
+      const workSets = sets.filter((set) => !set.isWarmup);
       const status = session.exerciseStatuses[planned.exerciseId] || "pending";
       lines.push(`## ${exercise.name}`);
       lines.push(`予定: ${formatWeight(planned.plannedWeightKg, exercise.loadType)} / ${planned.sets}セット / ${formatRepRange(planned, exercise)}`);
-      lines.push("実績:");
-      if (status === "skipped") {
+      lines.push("");
+      lines.push("ウォームアップ:");
+      if (warmupSets.length) {
+        warmupSets.forEach((set) => lines.push(markdownPerformedSet(set, exercise)));
+      } else {
+        lines.push("- なし");
+      }
+      lines.push("");
+      lines.push("本番:");
+      if (status === "skipped" && !workSets.length) {
         lines.push("- スキップ");
-      } else if (sets.length) {
-        sets.forEach((set) => lines.push(markdownPerformedSet(set, exercise)));
+      } else if (workSets.length) {
+        workSets.forEach((set) => lines.push(markdownPerformedSet(set, exercise)));
       } else {
         lines.push("- 記録なし");
       }
@@ -2575,17 +2914,31 @@
   function markdownPerformedSet(set, exercise) {
     if (set.painFlag) {
       const note = set.note ? ` / ${set.note}` : "";
-      return `- ${set.isExtraSet ? "追加: " : ""}痛みあり${note}`;
+      return `- ${set.isWarmup ? "ウォームアップ: " : set.isExtraSet ? "追加: " : ""}痛みあり${markdownRestText(set)}${note}`;
     }
-    const prefix = set.isExtraSet ? "追加: " : "";
+    const prefix = set.isWarmup ? "" : set.isExtraSet ? "追加: " : "";
+    const effort = set.rir ? ` RIR${set.rir}` : "";
     const note = set.note ? ` / ${set.note}` : "";
-    return `- ${prefix}${formatWeight(set.actualWeightKg, exercise.loadType)} x ${set.reps}回 RIR${set.rir}${note}`;
+    return `- ${prefix}${formatWeight(set.actualWeightKg, exercise.loadType)} x ${set.reps}回${effort}${markdownRestText(set)}${note}`;
+  }
+
+  function markdownRestText(set) {
+    const actual = set.actualRestSeconds;
+    const planned = set.plannedRestSeconds ?? set.restSeconds;
+    if (set.isWarmup) {
+      return actual === null || actual === undefined ? "" : ` / 休憩: 実際${actual}秒`;
+    }
+    if ((planned === null || planned === undefined) && (actual === null || actual === undefined)) {
+      return "";
+    }
+    const actualText = actual === null || actual === undefined ? "未記録" : `${actual}秒`;
+    return ` / 休憩: 予定${planned}秒・実際${actualText}`;
   }
 
   function markdownNotes(session) {
     const notes = [];
     const extraExercises = session.plannedSession.plannedExercises
-      .filter((planned) => session.performedSets.some((set) => set.exerciseId === planned.exerciseId && set.isExtraSet))
+      .filter((planned) => session.performedSets.some((set) => set.exerciseId === planned.exerciseId && set.isExtraSet && !set.isWarmup))
       .map((planned) => EXERCISES[planned.exerciseId].name);
     const skippedExercises = Object.entries(session.exerciseStatuses || {})
       .filter(([, status]) => status === "skipped")
@@ -2596,13 +2949,13 @@
     const warningRirZero = [...new Set(session.performedSets
       .filter((set) => {
         const planned = plannedById(set.exerciseId, session.plannedSession.plannedExercises);
-        return set.rir === "0" && planned && !planned.allOutAllowed;
+        return !set.isWarmup && set.rir === "0" && planned && !planned.allOutAllowed;
       })
       .map((set) => EXERCISES[set.exerciseId]?.name || set.exerciseId))];
     const allOutRirZero = [...new Set(session.performedSets
       .filter((set) => {
         const planned = plannedById(set.exerciseId, session.plannedSession.plannedExercises);
-        return set.rir === "0" && planned?.allOutAllowed;
+        return !set.isWarmup && set.rir === "0" && planned?.allOutAllowed;
       })
       .map((set) => EXERCISES[set.exerciseId]?.name || set.exerciseId))];
 
@@ -2739,14 +3092,15 @@
   function formatPerformedSet(set, exercise) {
     if (set.painFlag) {
       const note = set.note ? ` / ${escapeHtml(set.note)}` : "";
-      return `${set.isExtraSet ? "追加 " : `${set.setNumber}. `}痛みあり: 種目終了${note}`;
+      return `${set.isWarmup ? "ウォームアップ " : set.isExtraSet ? "追加 " : `${set.setNumber}. `}痛みあり: 種目終了${note}`;
     }
     const actual = formatWeight(set.actualWeightKg, exercise.loadType);
     const planned = formatWeight(set.plannedWeightKg, exercise.loadType);
     const diff = set.actualWeightKg === set.plannedWeightKg ? "" : ` (予定${planned})`;
-    const prefix = set.isExtraSet ? `追加 ${set.setNumber}. ` : `${set.setNumber}. `;
+    const prefix = set.isWarmup ? `ウォームアップ ${set.setNumber}. ` : set.isExtraSet ? `追加 ${set.setNumber}. ` : `${set.setNumber}. `;
+    const effort = set.rir ? ` RIR${set.rir} / RPE${set.rpe}` : "";
     const note = set.note ? ` / ${escapeHtml(set.note)}` : "";
-    return `${prefix}${actual} x ${set.reps}回 RIR${set.rir} / RPE${set.rpe}${diff}${note}`;
+    return `${prefix}${actual} x ${set.reps}回${effort}${set.isWarmup ? "" : diff}${note}`;
   }
 
   function summaryNotes(planned, exercise, sets, status) {
@@ -2760,10 +3114,10 @@
     if (sets.some((set) => set.painFlag)) {
       notes.push("痛みあり");
     }
-    if (!planned.allOutAllowed && sets.some((set) => set.rir === "0")) {
+    if (!planned.allOutAllowed && sets.some((set) => !set.isWarmup && set.rir === "0")) {
       notes.push("RIR0記録あり。次回はフォーム確認");
     }
-    if (sets.some((set) => set.isExtraSet)) {
+    if (sets.some((set) => set.isExtraSet && !set.isWarmup)) {
       notes.push("追加セットあり");
     }
     return notes.join(" / ");

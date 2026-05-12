@@ -32,6 +32,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -298,6 +299,25 @@ h3 {
   text-align: center;
 }
 
+.field select,
+.field textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
+  color: var(--text);
+  font-weight: 900;
+}
+
+.field textarea {
+  min-height: 86px;
+  font-weight: 700;
+  line-height: 1.45;
+  resize: vertical;
+}
+
 .weight-editor {
   margin-top: 10px;
 }
@@ -362,6 +382,10 @@ h3 {
   margin-top: 0;
 }
 
+.hidden-file-input {
+  display: none;
+}
+
 .settings-panel {
   background: var(--surface-2);
 }
@@ -409,6 +433,13 @@ h3 {
   font-size: 0.92rem;
 }
 
+.mini-button {
+  width: auto;
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 0.82rem;
+}
+
 .compact-list {
   display: grid;
   gap: 5px;
@@ -431,6 +462,86 @@ h3 {
   color: var(--muted);
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.history-list,
+.baseline-list {
+  display: grid;
+  gap: 10px;
+}
+
+.history-row,
+.baseline-row,
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.history-row {
+  width: 100%;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 900;
+  text-align: left;
+}
+
+.history-row small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.baseline-row {
+  min-height: 46px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--field);
+}
+
+.baseline-row span,
+.set-row span {
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.set-row {
+  align-items: flex-start;
+}
+
+.set-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.set-editor {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.baseline-save-button {
+  min-height: 44px;
+  margin-top: 12px;
+  font-size: 0.9rem;
+}
+
+.inline-notice {
+  align-self: flex-start;
+}
+
+.app-version-label {
+  text-align: center;
 }
 
 .coach-memo-input,
@@ -668,6 +779,21 @@ h3 {
 
   .reorder-actions {
     grid-template-columns: 1fr;
+  }
+
+  .history-row,
+  .baseline-row,
+  .set-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .set-actions {
+    width: 100%;
+  }
+
+  .set-actions .mini-button {
+    flex: 1;
   }
 
   .app-header {

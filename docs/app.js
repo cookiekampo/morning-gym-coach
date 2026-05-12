@@ -4,6 +4,8 @@
   const STORAGE_SESSIONS_KEY = "morning-gym-coach:v0.1:sessions";
   const STORAGE_ACTIVE_KEY = "morning-gym-coach:v0.1:activeSession";
   const STORAGE_LAST_COURSE_KEY = "morning-gym-coach:v0.5:lastCourse";
+  const STORAGE_BASELINE_WEIGHTS_KEY = "morning-gym-coach:v0.8:baselineWeights";
+  const APP_VERSION = "v0.8";
   const DEFAULT_COURSE_ID = "legs_45_v0.5";
   const RIR_ZERO_WARNING = "この種目でRIR0は非推奨です。フォームが崩れていない場合のみ記録してください。";
   const LEG_EXTENSION_ALLOUT_WARNING = "まだ後続種目があります。ここでオールアウトすると後の種目に影響します。記録しますか？";
@@ -280,6 +282,8 @@
     copyMessage: "",
     markdownFallback: "",
     settingsMessage: "",
+    summaryMessage: "",
+    editingSet: null,
     selectedCourseId: DEFAULT_COURSE_ID,
     coursePanelOpen: false,
     settingsPanelOpen: false,
@@ -317,6 +321,11 @@
 
     if (state.view === "summary") {
       renderSummary();
+      return;
+    }
+
+    if (state.view === "history") {
+      renderHistory();
       return;
     }
 
@@ -378,6 +387,7 @@
         <div class="action-row">
           ${activeSession ? '<button class="button" id="continue-session" type="button">続きから</button>' : ""}
           <button class="button ghost" id="toggle-reorder" type="button">${state.menuReorderMode ? "順番変更を閉じる" : "順番を変更"}</button>
+          <button class="button ghost" id="open-history" type="button">履歴</button>
           <button class="button primary" id="start-session" type="button">${state.menuReorderMode ? "この順番で開始" : "トレーニング開始"}</button>
           ${latestSession ? '<button class="button ghost" id="latest-summary" type="button">直近まとめ</button>' : ""}
         </div>
@@ -428,6 +438,11 @@
         setView("summary");
       });
     }
+
+    document.getElementById("open-history").addEventListener("click", () => {
+      clearSummaryTools();
+      setView("history");
+    });
 
     wireGlobalControls();
   }
@@ -735,7 +750,10 @@
     const orderSummary = renderOrderSummary(session);
     const cards = session.plannedSession.plannedExercises.map((planned) => {
       const exercise = EXERCISES[planned.exerciseId];
-      const sets = session.performedSets.filter((set) => set.exerciseId === planned.exerciseId);
+      const setEntries = session.performedSets
+        .map((set, index) => ({ set, index }))
+        .filter((entry) => entry.set.exerciseId === planned.exerciseId);
+      const sets = setEntries.map((entry) => entry.set);
       const status = session.exerciseStatuses[planned.exerciseId] || "pending";
       const plannedRows = Array.from({ length: planned.sets }, (_, index) => {
         const setNumber = index + 1;
@@ -743,10 +761,11 @@
       }).join("");
       const actualRows = status === "skipped"
         ? '<li class="muted">スキップ</li>'
-        : sets.length
-        ? sets.map((set) => `<li>${formatPerformedSet(set, exercise)}</li>`).join("")
+        : setEntries.length
+        ? setEntries.map((entry) => renderPerformedSetRow(entry.set, exercise, entry.index)).join("")
         : '<li class="muted">記録なし</li>';
       const notes = summaryNotes(planned, exercise, sets, status);
+      const baselineButton = renderBaselineSaveButton(planned, exercise, sets);
 
       return `
         <section class="summary-card">
@@ -757,6 +776,7 @@
           <ul class="summary-list">${actualRows}</ul>
           ${notes ? `<p class="summary-note">${notes}</p>` : ""}
           <p class="judge">判定: ${judgeExercise(planned, exercise, sets)}</p>
+          ${baselineButton}
         </section>
       `;
     }).join("");
@@ -773,6 +793,7 @@
         ${orderSummary}
         ${renderLogTools(session)}
         ${renderCoachMemoSummary(session)}
+        ${state.summaryMessage ? `<p class="notice-pill inline-notice">${state.summaryMessage}</p>` : ""}
         <div class="stack">${cards}</div>
         <div class="action-row">
           <button class="button primary" id="new-session" type="button">新しく始める</button>
@@ -803,7 +824,225 @@
       setView("menu");
     });
     wireLogTools();
+    wireSummarySetControls();
+    wireBaselineSaveButtons();
     wireGlobalControls();
+  }
+
+  function renderPerformedSetRow(set, exercise, setIndex) {
+    const editing = state.editingSet
+      && state.editingSet.sessionId === state.session.id
+      && state.editingSet.setIndex === setIndex;
+    const editor = editing ? renderSetEditor(set, exercise, setIndex) : "";
+    return `
+      <li>
+        <div class="set-row">
+          <span>${formatPerformedSet(set, exercise)}</span>
+          <div class="set-actions">
+            <button class="button ghost mini-button" type="button" data-edit-set="${setIndex}">修正</button>
+            <button class="button warning mini-button" type="button" data-delete-set="${setIndex}">削除</button>
+          </div>
+        </div>
+        ${editor}
+      </li>
+    `;
+  }
+
+  function renderSetEditor(set, exercise, setIndex) {
+    const rirOptions = ["", ...RIR_OPTIONS].map((rir) => {
+      const selected = String(set.rir ?? "") === rir ? " selected" : "";
+      const label = rir || "未入力";
+      return `<option value="${rir}"${selected}>${label}</option>`;
+    }).join("");
+    const reps = set.reps ?? "";
+    const note = set.note || "";
+
+    return `
+      <div class="set-editor" data-set-editor="${setIndex}">
+        <div class="input-grid">
+          <div class="field">
+            <label for="edit-weight-${setIndex}">重量 kg</label>
+            <input id="edit-weight-${setIndex}" type="number" inputmode="decimal" min="0" step="${exercise.weightStepKg}" value="${set.actualWeightKg ?? ""}">
+          </div>
+          <div class="field">
+            <label for="edit-reps-${setIndex}">回数</label>
+            <input id="edit-reps-${setIndex}" type="number" inputmode="numeric" min="0" step="1" value="${reps}">
+          </div>
+        </div>
+        <div class="field">
+          <label for="edit-rir-${setIndex}">RIR</label>
+          <select id="edit-rir-${setIndex}">${rirOptions}</select>
+        </div>
+        <div class="field">
+          <label for="edit-note-${setIndex}">メモ</label>
+          <textarea id="edit-note-${setIndex}" rows="3">${escapeHtml(note)}</textarea>
+        </div>
+        <div class="compact-actions">
+          <button class="button" type="button" data-save-set="${setIndex}">保存</button>
+          <button class="button ghost" type="button" data-cancel-set-edit="${setIndex}">キャンセル</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderBaselineSaveButton(planned, exercise, sets) {
+    const latestSet = [...sets].reverse().find((set) => !set.painFlag && Number.isFinite(Number(set.actualWeightKg)));
+    if (!latestSet) {
+      return "";
+    }
+    const weight = Number(latestSet.actualWeightKg);
+    return `
+      <button class="button ghost baseline-save-button" type="button" data-save-baseline="${planned.exerciseId}" data-baseline-weight="${weight}">
+        ${formatWeight(weight, exercise.loadType)}を次回基準にする
+      </button>
+    `;
+  }
+
+  function wireSummarySetControls() {
+    document.querySelectorAll("[data-edit-set]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.editingSet = {
+          sessionId: state.session.id,
+          setIndex: Number(button.dataset.editSet),
+        };
+        renderSummary();
+      });
+    });
+
+    document.querySelectorAll("[data-cancel-set-edit]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.editingSet = null;
+        renderSummary();
+      });
+    });
+
+    document.querySelectorAll("[data-save-set]").forEach((button) => {
+      button.addEventListener("click", () => saveEditedSet(Number(button.dataset.saveSet)));
+    });
+
+    document.querySelectorAll("[data-delete-set]").forEach((button) => {
+      button.addEventListener("click", () => deleteSummarySet(Number(button.dataset.deleteSet)));
+    });
+  }
+
+  function wireBaselineSaveButtons() {
+    document.querySelectorAll("[data-save-baseline]").forEach((button) => {
+      button.addEventListener("click", () => {
+        saveBaselineWeight(button.dataset.saveBaseline, Number(button.dataset.baselineWeight));
+      });
+    });
+  }
+
+  function renderHistory() {
+    const sessions = loadSessions()
+      .map(normalizeLoadedSession)
+      .sort((left, right) => new Date(right.startedAt || 0) - new Date(left.startedAt || 0));
+    const rows = sessions.length
+      ? sessions.map((session) => `
+        <button class="history-row" type="button" data-history-session="${session.id}">
+          <span>${sessionDate(session)} ${courseLabelForSession(session)}</span>
+          <small>${session.status === "active" ? "進行中" : "まとめ"}</small>
+        </button>
+      `).join("")
+      : '<p class="helper-text">履歴はまだありません。</p>';
+
+    app.innerHTML = `
+      <section class="screen">
+        ${renderAppHeader()}
+        <header class="screen-header">
+          <div>
+            <p class="eyebrow">過去ログ</p>
+            <h1>履歴</h1>
+          </div>
+        </header>
+        <div class="history-list">${rows}</div>
+        <div class="action-row">
+          <button class="button ghost" id="history-back-menu" type="button">メニューへ</button>
+        </div>
+      </section>
+      ${renderOverlayPanels()}
+    `;
+
+    document.querySelectorAll("[data-history-session]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const session = loadSessions().map(normalizeLoadedSession).find((item) => item.id === button.dataset.historySession);
+        if (!session) {
+          state.settingsMessage = "履歴を読み込めませんでした。";
+          renderHistory();
+          return;
+        }
+        state.session = session;
+        clearSummaryTools();
+        state.summaryMessage = "";
+        state.editingSet = null;
+        setView("summary");
+      });
+    });
+
+    document.getElementById("history-back-menu").addEventListener("click", () => {
+      state.session = loadActiveSession();
+      setView("menu");
+    });
+    wireGlobalControls();
+  }
+
+  function courseLabelForSession(session) {
+    return `${session.plannedSession?.name || coursePlanById(sessionCourseId(session)).name} / ${session.plannedSession?.durationMinutes || 45}分`;
+  }
+
+  function saveEditedSet(setIndex) {
+    const session = state.session;
+    const set = session?.performedSets?.[setIndex];
+    if (!session || !set) {
+      return;
+    }
+
+    const actualWeightKg = Number(document.getElementById(`edit-weight-${setIndex}`)?.value);
+    const repsInput = document.getElementById(`edit-reps-${setIndex}`)?.value || "";
+    const rir = document.getElementById(`edit-rir-${setIndex}`)?.value || null;
+    const note = document.getElementById(`edit-note-${setIndex}`)?.value || "";
+
+    if (!Number.isFinite(actualWeightKg) || actualWeightKg <= 0) {
+      window.alert("重量を入力してください。");
+      return;
+    }
+
+    const reps = repsInput === "" ? null : Number.parseInt(repsInput, 10);
+    if (repsInput !== "" && (!Number.isInteger(reps) || reps < 0)) {
+      window.alert("回数を入力してください。");
+      return;
+    }
+
+    set.actualWeightKg = actualWeightKg;
+    set.reps = reps;
+    set.rir = rir;
+    set.rpe = rir ? rirToRpe(rir) : null;
+    set.isAllOut = rir === "0";
+    set.note = note;
+    session.performedSets[setIndex] = set;
+    state.session = session;
+    rebuildSessionProgress();
+    saveSession(session);
+    state.editingSet = null;
+    state.summaryMessage = "セットを修正しました";
+    renderSummary();
+  }
+
+  function deleteSummarySet(setIndex) {
+    const session = state.session;
+    if (!session?.performedSets?.[setIndex]) {
+      return;
+    }
+    if (!window.confirm("このセットを削除します。よろしいですか？")) {
+      return;
+    }
+    session.performedSets.splice(setIndex, 1);
+    state.session = session;
+    rebuildSessionProgress();
+    saveSession(session);
+    state.editingSet = null;
+    state.summaryMessage = "セットを削除しました";
+    renderSummary();
   }
 
   function renderLogTools(session) {
@@ -902,7 +1141,7 @@
     return `
       <header class="app-header">
         <div class="brand-block">
-          <p class="brand-name">Morning Gym Coach</p>
+          <p class="brand-name">Morning Gym Coach ${APP_VERSION}</p>
           <button class="course-trigger" id="open-course-panel" type="button">コース: ${courseLabel(course)} ▾</button>
         </div>
         <button class="settings-trigger" id="open-settings-panel" type="button" aria-label="設定">設定</button>
@@ -962,6 +1201,7 @@
     }
     const memoSession = currentMemoSession();
     const memoText = memoSession?.coachMemo || "";
+    const baselineList = renderBaselineWeightsSettings();
     const memoControls = memoSession
       ? `
         <textarea id="coach-memo-input" class="coach-memo-input" rows="5" placeholder="ChatGPTの返答を貼り付け">${escapeHtml(memoText)}</textarea>
@@ -988,13 +1228,23 @@
         </div>
         <div class="settings-stack">
           ${notificationControlHtml()}
+          <button class="button ghost" id="open-history-from-settings" type="button">履歴</button>
+          <button class="button ghost" id="refresh-app" type="button">最新版に更新</button>
+          <button class="button ghost" id="backup-records" type="button">記録をバックアップ</button>
+          <button class="button ghost" id="restore-records" type="button">記録を復元</button>
+          <input class="hidden-file-input" id="restore-file-input" type="file" accept="application/json,.json">
           <button class="button ghost" id="restart-today" type="button">今日のトレーニングをやり直す</button>
           <button class="button warning" id="delete-today-records" type="button">今日の記録だけ削除</button>
+          <section class="settings-section">
+            <h3>次回基準重量</h3>
+            ${baselineList}
+          </section>
           <section class="settings-section">
             <h3>コーチメモ</h3>
             ${memoControls}
           </section>
           ${state.settingsMessage ? `<p class="helper-text">${state.settingsMessage}</p>` : ""}
+          <p class="helper-text app-version-label">Morning Gym Coach ${APP_VERSION}</p>
           <section class="danger-zone">
             <h3>危険エリア</h3>
             <button class="button danger" id="delete-all-records" type="button">すべての記録を削除</button>
@@ -1015,6 +1265,29 @@
       return '<button class="button ghost" type="button" disabled>通知は拒否されています</button>';
     }
     return '<button class="button" id="allow-notifications" type="button">通知を許可</button>';
+  }
+
+  function renderBaselineWeightsSettings() {
+    const baselineWeights = loadBaselineWeights();
+    const entries = Object.entries(baselineWeights)
+      .filter(([exerciseId, weight]) => EXERCISES[exerciseId] && Number.isFinite(Number(weight)))
+      .sort(([leftId], [rightId]) => EXERCISES[leftId].name.localeCompare(EXERCISES[rightId].name, "ja"));
+
+    if (!entries.length) {
+      return '<p class="helper-text">保存済みの基準重量はありません。</p>';
+    }
+
+    const rows = entries.map(([exerciseId, weight]) => {
+      const exercise = EXERCISES[exerciseId];
+      return `
+        <div class="baseline-row">
+          <span>${exercise.name}: ${formatWeight(Number(weight), exercise.loadType)}</span>
+          <button class="button ghost mini-button" type="button" data-delete-baseline="${exerciseId}">削除</button>
+        </div>
+      `;
+    }).join("");
+
+    return `<div class="baseline-list">${rows}</div>`;
   }
 
   function wireGlobalControls() {
@@ -1062,6 +1335,32 @@
       });
     }
 
+    const historyButton = document.getElementById("open-history-from-settings");
+    if (historyButton) {
+      historyButton.addEventListener("click", () => {
+        state.settingsPanelOpen = false;
+        clearSummaryTools();
+        setView("history");
+      });
+    }
+
+    const refreshButton = document.getElementById("refresh-app");
+    if (refreshButton) {
+      refreshButton.addEventListener("click", refreshApp);
+    }
+
+    const backupButton = document.getElementById("backup-records");
+    if (backupButton) {
+      backupButton.addEventListener("click", backupRecords);
+    }
+
+    const restoreButton = document.getElementById("restore-records");
+    const restoreInput = document.getElementById("restore-file-input");
+    if (restoreButton && restoreInput) {
+      restoreButton.addEventListener("click", () => restoreInput.click());
+      restoreInput.addEventListener("change", restoreRecordsFromFile);
+    }
+
     const restartButton = document.getElementById("restart-today");
     if (restartButton) {
       restartButton.addEventListener("click", restartTodayTraining);
@@ -1076,6 +1375,10 @@
     if (deleteAllButton) {
       deleteAllButton.addEventListener("click", deleteAllRecords);
     }
+
+    document.querySelectorAll("[data-delete-baseline]").forEach((button) => {
+      button.addEventListener("click", () => deleteBaselineWeight(button.dataset.deleteBaseline));
+    });
 
     wireCoachMemoPanel(currentMemoSession());
   }
@@ -1243,13 +1546,12 @@
     }
 
     stopTimer();
-    window.localStorage.removeItem(STORAGE_SESSIONS_KEY);
-    window.localStorage.removeItem(STORAGE_ACTIVE_KEY);
-    window.localStorage.removeItem(STORAGE_LAST_COURSE_KEY);
+    removeMorningGymStorage();
     state.selectedCourseId = DEFAULT_COURSE_ID;
     state.coursePanelOpen = false;
     state.settingsPanelOpen = false;
     state.settingsMessage = "";
+    state.summaryMessage = "";
     resetWorkingMenu();
     state.session = null;
     state.coachNote = "";
@@ -1257,6 +1559,130 @@
     state.restNotified = false;
     resetDraft();
     setView("menu");
+  }
+
+  function backupRecords() {
+    const today = todayKey();
+    const payload = {
+      appName: "Morning Gym Coach",
+      appVersion: APP_VERSION,
+      exportedAt: new Date().toISOString(),
+      sessions: loadSessions(),
+      activeSession: loadActiveSession(),
+      lastCourse: window.localStorage.getItem(STORAGE_LAST_COURSE_KEY),
+      baselineWeights: loadBaselineWeights(),
+      storage: morningGymStorageSnapshot(),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `morning-gym-coach-backup-${today}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    state.settingsMessage = "バックアップJSONを作成しました";
+    render();
+  }
+
+  function restoreRecordsFromFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(String(reader.result || ""));
+        if (!isValidBackupPayload(payload)) {
+          throw new Error("Invalid backup payload");
+        }
+        if (!window.confirm("現在の記録をバックアップ内容で上書きします。よろしいですか？")) {
+          return;
+        }
+        restoreBackupPayload(payload);
+        state.settingsMessage = "バックアップから復元しました";
+        resetAppStateAfterStorageChange();
+      } catch (error) {
+        console.warn("Restore failed", error);
+        state.settingsMessage = "復元できません。不正なJSONまたは形式違いです。";
+        render();
+      }
+    };
+    reader.onerror = () => {
+      state.settingsMessage = "復元できません。ファイルを読み込めませんでした。";
+      render();
+    };
+    reader.readAsText(file);
+  }
+
+  function isValidBackupPayload(payload) {
+    return payload
+      && typeof payload === "object"
+      && (payload.storage && typeof payload.storage === "object" || Array.isArray(payload.sessions));
+  }
+
+  function restoreBackupPayload(payload) {
+    removeMorningGymStorage();
+    if (payload.storage && typeof payload.storage === "object") {
+      Object.entries(payload.storage).forEach(([key, value]) => {
+        if (key.startsWith("morning-gym-coach:")) {
+          window.localStorage.setItem(key, typeof value === "string" ? value : JSON.stringify(value));
+        }
+      });
+      return;
+    }
+
+    window.localStorage.setItem(STORAGE_SESSIONS_KEY, JSON.stringify(payload.sessions || []));
+    if (payload.activeSession) {
+      window.localStorage.setItem(STORAGE_ACTIVE_KEY, JSON.stringify(payload.activeSession));
+    }
+    if (payload.lastCourse && COURSE_PLANS[payload.lastCourse]) {
+      window.localStorage.setItem(STORAGE_LAST_COURSE_KEY, payload.lastCourse);
+    }
+    if (payload.baselineWeights && typeof payload.baselineWeights === "object") {
+      window.localStorage.setItem(STORAGE_BASELINE_WEIGHTS_KEY, JSON.stringify(payload.baselineWeights));
+    }
+  }
+
+  function resetAppStateAfterStorageChange() {
+    stopTimer();
+    state.session = loadActiveSession();
+    state.selectedCourseId = state.session ? sessionCourseId(state.session) : loadLastCourseId();
+    state.coursePanelOpen = false;
+    state.settingsPanelOpen = false;
+    state.summaryMessage = "";
+    state.editingSet = null;
+    state.coachNote = "";
+    clearSummaryTools();
+    resetDraft();
+    resetWorkingMenu();
+    setView("menu");
+  }
+
+  async function refreshApp() {
+    if (!window.confirm("最新版を読み込み直します。よろしいですか？")) {
+      return;
+    }
+    try {
+      if ("serviceWorker" in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.update()));
+      }
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys
+          .filter((key) => key.startsWith("morning-gym-coach"))
+          .map((key) => caches.delete(key)));
+      }
+    } catch (error) {
+      console.warn("Refresh failed", error);
+    } finally {
+      window.location.reload();
+    }
   }
 
   function restartTodayTraining() {
@@ -1763,13 +2189,15 @@
   function resetWorkingMenu() {
     const course = currentCoursePlan();
     state.menuOrder = defaultOrder();
-    state.menuPlannedExercises = clone(course.plannedExercises);
+    state.menuPlannedExercises = applyBaselineWeights(clone(course.plannedExercises));
     state.menuReorderMode = false;
   }
 
   function clearSummaryTools() {
     state.copyMessage = "";
     state.markdownFallback = "";
+    state.summaryMessage = "";
+    state.editingSet = null;
   }
 
   function nextSetNumberForExercise(exerciseId) {
@@ -1929,6 +2357,74 @@
     }
   }
 
+  function loadBaselineWeights() {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_BASELINE_WEIGHTS_KEY);
+      const baselineWeights = raw ? JSON.parse(raw) : {};
+      return baselineWeights && typeof baselineWeights === "object" && !Array.isArray(baselineWeights)
+        ? baselineWeights
+        : {};
+    } catch (error) {
+      console.warn("Could not load baseline weights", error);
+      return {};
+    }
+  }
+
+  function saveBaselineWeights(baselineWeights) {
+    window.localStorage.setItem(STORAGE_BASELINE_WEIGHTS_KEY, JSON.stringify(baselineWeights));
+  }
+
+  function applyBaselineWeights(plannedExercises) {
+    const baselineWeights = loadBaselineWeights();
+    return plannedExercises.map((planned) => {
+      const baselineWeight = Number(baselineWeights[planned.exerciseId]);
+      if (Number.isFinite(baselineWeight) && baselineWeight > 0) {
+        return {
+          ...planned,
+          plannedWeightKg: baselineWeight,
+        };
+      }
+      return planned;
+    });
+  }
+
+  function saveBaselineWeight(exerciseId, weight) {
+    if (!EXERCISES[exerciseId] || !Number.isFinite(weight) || weight <= 0) {
+      return;
+    }
+    const baselineWeights = loadBaselineWeights();
+    baselineWeights[exerciseId] = weight;
+    saveBaselineWeights(baselineWeights);
+    state.summaryMessage = "次回基準重量を保存しました";
+    state.settingsMessage = "次回基準重量を保存しました";
+    render();
+  }
+
+  function deleteBaselineWeight(exerciseId) {
+    const baselineWeights = loadBaselineWeights();
+    delete baselineWeights[exerciseId];
+    saveBaselineWeights(baselineWeights);
+    state.settingsMessage = "次回基準重量を削除しました";
+    resetWorkingMenu();
+    render();
+  }
+
+  function morningGymStorageSnapshot() {
+    return Object.keys(window.localStorage)
+      .filter((key) => key.startsWith("morning-gym-coach:"))
+      .sort()
+      .reduce((snapshot, key) => {
+        snapshot[key] = window.localStorage.getItem(key);
+        return snapshot;
+      }, {});
+  }
+
+  function removeMorningGymStorage() {
+    Object.keys(window.localStorage)
+      .filter((key) => key.startsWith("morning-gym-coach:"))
+      .forEach((key) => window.localStorage.removeItem(key));
+  }
+
   function loadActiveSession() {
     try {
       const raw = window.localStorage.getItem(STORAGE_ACTIVE_KEY);
@@ -2022,7 +2518,7 @@
       sessions.push(snapshot);
     }
 
-    window.localStorage.setItem(STORAGE_SESSIONS_KEY, JSON.stringify(sessions.slice(-20)));
+    window.localStorage.setItem(STORAGE_SESSIONS_KEY, JSON.stringify(sessions));
     if (session.status === "active") {
       window.localStorage.setItem(STORAGE_ACTIVE_KEY, JSON.stringify(snapshot));
     } else {
@@ -2078,10 +2574,12 @@
 
   function markdownPerformedSet(set, exercise) {
     if (set.painFlag) {
-      return `- ${set.isExtraSet ? "追加: " : ""}痛みあり`;
+      const note = set.note ? ` / ${set.note}` : "";
+      return `- ${set.isExtraSet ? "追加: " : ""}痛みあり${note}`;
     }
     const prefix = set.isExtraSet ? "追加: " : "";
-    return `- ${prefix}${formatWeight(set.actualWeightKg, exercise.loadType)} x ${set.reps}回 RIR${set.rir}`;
+    const note = set.note ? ` / ${set.note}` : "";
+    return `- ${prefix}${formatWeight(set.actualWeightKg, exercise.loadType)} x ${set.reps}回 RIR${set.rir}${note}`;
   }
 
   function markdownNotes(session) {
@@ -2240,13 +2738,15 @@
 
   function formatPerformedSet(set, exercise) {
     if (set.painFlag) {
-      return `${set.isExtraSet ? "追加 " : `${set.setNumber}. `}痛みあり: 種目終了`;
+      const note = set.note ? ` / ${escapeHtml(set.note)}` : "";
+      return `${set.isExtraSet ? "追加 " : `${set.setNumber}. `}痛みあり: 種目終了${note}`;
     }
     const actual = formatWeight(set.actualWeightKg, exercise.loadType);
     const planned = formatWeight(set.plannedWeightKg, exercise.loadType);
     const diff = set.actualWeightKg === set.plannedWeightKg ? "" : ` (予定${planned})`;
     const prefix = set.isExtraSet ? `追加 ${set.setNumber}. ` : `${set.setNumber}. `;
-    return `${prefix}${actual} x ${set.reps}回 RIR${set.rir} / RPE${set.rpe}${diff}`;
+    const note = set.note ? ` / ${escapeHtml(set.note)}` : "";
+    return `${prefix}${actual} x ${set.reps}回 RIR${set.rir} / RPE${set.rpe}${diff}${note}`;
   }
 
   function summaryNotes(planned, exercise, sets, status) {

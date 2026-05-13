@@ -6,7 +6,7 @@
   const STORAGE_LAST_COURSE_KEY = "morning-gym-coach:v0.5:lastCourse";
   const STORAGE_BASELINE_WEIGHTS_KEY = "morning-gym-coach:v0.8:baselineWeights";
   const STORAGE_BASELINE_SET_COUNTS_KEY = "morning-gym-coach:vNext:baselineSetCounts";
-  const APP_VERSION = "vNext";
+  const APP_VERSION = "v0.10";
   const DEFAULT_COURSE_ID = "legs_45_v0.5";
   const RIR_ZERO_WARNING = "この種目でRIR0は非推奨です。フォームが崩れていない場合のみ記録してください。";
   const LEG_EXTENSION_ALLOUT_WARNING = "まだ後続種目があります。ここでオールアウトすると後の種目に影響します。記録しますか？";
@@ -119,6 +119,86 @@
       loadType: "machine_stack",
       weightStepKg: 2.5,
       defaultRepRange: "10〜12",
+      allOutAllowed: true,
+      restPauseAllowed: true,
+    },
+    smith_shoulder_press: {
+      id: "smith_shoulder_press",
+      name: "スミスショルダープレス",
+      type: "heavy_compound",
+      loadType: "smith_machine_total",
+      weightStepKg: 2.5,
+      defaultRepRange: "6〜10",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    side_raise: {
+      id: "side_raise",
+      name: "サイドレイズ",
+      type: "isolation",
+      loadType: "dumbbell_each_hand",
+      weightStepKg: 2.5,
+      defaultRepRange: "12〜20",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    machine_shoulder_press: {
+      id: "machine_shoulder_press",
+      name: "マシンショルダープレス",
+      type: "machine",
+      loadType: "machine_stack",
+      weightStepKg: 2.5,
+      defaultRepRange: "8〜12",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    face_pull: {
+      id: "face_pull",
+      name: "フェイスプル",
+      type: "isolation",
+      loadType: "cable_stack",
+      weightStepKg: 2.5,
+      defaultRepRange: "12〜20",
+      allOutAllowed: true,
+      restPauseAllowed: true,
+    },
+    ez_bar_curl: {
+      id: "ez_bar_curl",
+      name: "EZバーカール",
+      type: "isolation",
+      loadType: "ez_bar_total",
+      weightStepKg: 2.5,
+      defaultRepRange: "8〜12",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    french_press: {
+      id: "french_press",
+      name: "フレンチプレス",
+      type: "isolation",
+      loadType: "dumbbell_total",
+      weightStepKg: 2.5,
+      defaultRepRange: "10〜15",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    incline_dumbbell_curl: {
+      id: "incline_dumbbell_curl",
+      name: "インクラインダンベルカール",
+      type: "isolation",
+      loadType: "dumbbell_each_hand",
+      weightStepKg: 2.5,
+      defaultRepRange: "10〜12",
+      allOutAllowed: false,
+      restPauseAllowed: false,
+    },
+    cable_pressdown: {
+      id: "cable_pressdown",
+      name: "ケーブルプレスダウン",
+      type: "isolation",
+      loadType: "cable_stack",
+      weightStepKg: 2.5,
+      defaultRepRange: "12〜15",
       allOutAllowed: true,
       restPauseAllowed: true,
     },
@@ -254,6 +334,102 @@
           repRange: "10〜12",
           targetRir: [2, 1, 0],
           restSeconds: 90,
+          allOutAllowed: true,
+          restPauseAllowed: true,
+        },
+      ],
+    },
+    "shoulder_45_v0.10": {
+      courseId: "shoulder_45_v0.10",
+      id: "shoulder_45_v0.10",
+      name: "肩",
+      durationMinutes: 45,
+      plannedExercises: [
+        {
+          exerciseId: "smith_shoulder_press",
+          plannedWeightKg: 30,
+          sets: 3,
+          repRange: "6〜10",
+          targetRir: [3, 2, 1],
+          restSeconds: 150,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "side_raise",
+          plannedWeightKg: 7.5,
+          sets: 3,
+          repRange: "12〜20",
+          targetRir: [2, 1, 1],
+          restSeconds: 75,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "machine_shoulder_press",
+          plannedWeightKg: 25,
+          sets: 2,
+          repRange: "8〜12",
+          targetRir: [2, 1],
+          restSeconds: 120,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "face_pull",
+          plannedWeightKg: 20,
+          sets: 2,
+          repRange: "12〜20",
+          targetRir: [1, 0],
+          restSeconds: 60,
+          allOutAllowed: true,
+          restPauseAllowed: true,
+        },
+      ],
+    },
+    "arms_45_v0.10": {
+      courseId: "arms_45_v0.10",
+      id: "arms_45_v0.10",
+      name: "腕",
+      durationMinutes: 45,
+      plannedExercises: [
+        {
+          exerciseId: "ez_bar_curl",
+          plannedWeightKg: 20,
+          sets: 3,
+          repRange: "8〜12",
+          targetRir: [2, 1, 1],
+          restSeconds: 90,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "french_press",
+          plannedWeightKg: 15,
+          sets: 3,
+          repRange: "10〜15",
+          targetRir: [2, 1, 1],
+          restSeconds: 90,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "incline_dumbbell_curl",
+          plannedWeightKg: 7.5,
+          sets: 2,
+          repRange: "10〜12",
+          targetRir: [2, 1],
+          restSeconds: 90,
+          allOutAllowed: false,
+          restPauseAllowed: false,
+        },
+        {
+          exerciseId: "cable_pressdown",
+          plannedWeightKg: 25,
+          sets: 2,
+          repRange: "12〜15",
+          targetRir: [1, 0],
+          restSeconds: 60,
           allOutAllowed: true,
           restPauseAllowed: true,
         },
@@ -3227,6 +3403,12 @@
     }
 
     const legacyId = session?.plannedSession?.id || session?.id || "";
+    if (legacyId.includes("shoulder")) {
+      return "shoulder_45_v0.10";
+    }
+    if (legacyId.includes("arms")) {
+      return "arms_45_v0.10";
+    }
     if (legacyId.includes("back")) {
       return "back_45_v0.7";
     }
@@ -3234,6 +3416,12 @@
       return "chest_45_v0.5";
     }
     const exerciseIds = (session?.plannedSession?.plannedExercises || []).map((planned) => planned.exerciseId);
+    if (exerciseIds.some((exerciseId) => ["smith_shoulder_press", "side_raise", "machine_shoulder_press", "face_pull"].includes(exerciseId))) {
+      return "shoulder_45_v0.10";
+    }
+    if (exerciseIds.some((exerciseId) => ["ez_bar_curl", "french_press", "incline_dumbbell_curl", "cable_pressdown"].includes(exerciseId))) {
+      return "arms_45_v0.10";
+    }
     if (exerciseIds.some((exerciseId) => ["deadlift", "lat_pulldown", "seated_row", "machine_row"].includes(exerciseId))) {
       return "back_45_v0.7";
     }

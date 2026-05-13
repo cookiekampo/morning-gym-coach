@@ -328,6 +328,57 @@ h3 {
   padding: 0 12px;
 }
 
+.set-count-editor {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 10px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--field);
+}
+
+.set-count-editor span,
+.set-count-editor small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.set-count-editor small {
+  grid-column: 1 / -1;
+  font-size: 0.78rem;
+}
+
+.stepper {
+  display: grid;
+  grid-template-columns: 42px minmax(72px, auto) 42px;
+  gap: 6px;
+  align-items: center;
+  text-align: center;
+}
+
+.stepper .mini-button {
+  min-height: 42px;
+}
+
+.estimate-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.estimate-card strong {
+  font-size: 1rem;
+}
+
+.warning-text {
+  color: var(--warn);
+}
+
 .rir-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

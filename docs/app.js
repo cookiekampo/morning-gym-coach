@@ -5,6 +5,7 @@
   const STORAGE_ACTIVE_KEY = "morning-gym-coach:v0.1:activeSession";
   const STORAGE_LAST_COURSE_KEY = "morning-gym-coach:v0.5:lastCourse";
   const STORAGE_BASELINE_WEIGHTS_KEY = "morning-gym-coach:v0.8:baselineWeights";
+  const STORAGE_BASELINE_SET_COUNTS_KEY = "morning-gym-coach:vNext:baselineSetCounts";
   const APP_VERSION = "vNext";
   const DEFAULT_COURSE_ID = "legs_45_v0.5";
   const RIR_ZERO_WARNING = "この種目でRIR0は非推奨です。フォームが崩れていない場合のみ記録してください。";
@@ -143,9 +144,9 @@
         {
           exerciseId: "bulgarian_split_squat",
           plannedWeightKg: 10,
-          sets: 2,
+          sets: 3,
           repRange: "8〜10",
-          targetRir: [2, 1],
+          targetRir: [3, 2, 1],
           restSeconds: 120,
           allOutAllowed: false,
           restPauseAllowed: false,
@@ -153,9 +154,9 @@
         {
           exerciseId: "leg_extension",
           plannedWeightKg: 30,
-          sets: 2,
+          sets: 3,
           repRange: "12〜15",
-          targetRir: [1, 0],
+          targetRir: [2, 1, 0],
           restSeconds: 60,
           allOutAllowed: true,
           restPauseAllowed: true,
@@ -181,9 +182,9 @@
         {
           exerciseId: "incline_dumbbell_fly",
           plannedWeightKg: 7.5,
-          sets: 2,
+          sets: 3,
           repRange: "10〜12",
-          targetRir: [2, 1],
+          targetRir: [2, 1, 1],
           restSeconds: 90,
           allOutAllowed: false,
           restPauseAllowed: false,
@@ -201,9 +202,9 @@
         {
           exerciseId: "pectoral_fly",
           plannedWeightKg: 30,
-          sets: 2,
+          sets: 3,
           repRange: "12〜15",
-          targetRir: [1, 0],
+          targetRir: [2, 1, 0],
           restSeconds: 60,
           allOutAllowed: true,
           restPauseAllowed: true,
@@ -239,9 +240,9 @@
         {
           exerciseId: "seated_row",
           plannedWeightKg: 40,
-          sets: 2,
+          sets: 3,
           repRange: "8〜12",
-          targetRir: [2, 1],
+          targetRir: [2, 1, 1],
           restSeconds: 120,
           allOutAllowed: false,
           restPauseAllowed: false,
@@ -249,9 +250,9 @@
         {
           exerciseId: "machine_row",
           plannedWeightKg: 35,
-          sets: 2,
+          sets: 3,
           repRange: "10〜12",
-          targetRir: [1, 0],
+          targetRir: [2, 1, 0],
           restSeconds: 90,
           allOutAllowed: true,
           restPauseAllowed: true,
@@ -358,8 +359,12 @@
       state.menuOrder = defaultOrder();
     }
     if (!state.menuPlannedExercises.length) {
-      state.menuPlannedExercises = clone(course.plannedExercises);
+      state.menuPlannedExercises = applyMenuBaselines(clone(course.plannedExercises), course.courseId);
     }
+    const estimateMinutes = estimateMenuDurationMinutes(state.menuPlannedExercises);
+    const estimateWarning = estimateMinutes > 45
+      ? '<p class="helper-text warning-text">セット数が多く、45分を超える可能性があります。</p>'
+      : "";
     const cards = state.menuOrder.map((exerciseId, index) => {
       const planned = plannedById(exerciseId, state.menuPlannedExercises);
       const exercise = EXERCISES[planned.exerciseId];
@@ -376,6 +381,7 @@
             <div><dt>休憩</dt><dd>${planned.restSeconds}秒</dd></div>
           </dl>
           ${renderPlannedWeightEditor(planned, exercise)}
+          ${renderPlannedSetCountEditor(planned, exercise)}
           <p class="helper-text">${menuSafetyText(planned, exercise)}</p>
           ${state.menuReorderMode ? `
             <div class="reorder-actions">
@@ -396,10 +402,15 @@
             <h1>${courseLabel(course)}</h1>
           </div>
         </header>
+        <div class="estimate-card">
+          <strong>推定: 約${estimateMinutes}分</strong>
+          ${estimateWarning}
+        </div>
         <div class="stack">${cards}</div>
         <div class="action-row">
           ${activeSession ? '<button class="button" id="continue-session" type="button">続きから</button>' : ""}
           <button class="button ghost" id="toggle-reorder" type="button">${state.menuReorderMode ? "順番変更を閉じる" : "順番を変更"}</button>
+          <button class="button ghost" id="save-baseline-set-counts" type="button">このセット数を次回の基準にする</button>
           <button class="button ghost" id="open-history" type="button">履歴</button>
           <button class="button primary" id="start-session" type="button">${state.menuReorderMode ? "この順番で開始" : "トレーニング開始"}</button>
           ${latestSession ? '<button class="button ghost" id="latest-summary" type="button">直近まとめ</button>' : ""}
@@ -433,6 +444,13 @@
     document.querySelectorAll("[data-planned-weight]").forEach((input) => {
       input.addEventListener("input", () => updateMenuPlannedWeight(input.dataset.plannedWeight, input.value));
     });
+    document.querySelectorAll("[data-set-count-minus]").forEach((button) => {
+      button.addEventListener("click", () => adjustMenuSetCount(button.dataset.setCountMinus, -1));
+    });
+    document.querySelectorAll("[data-set-count-plus]").forEach((button) => {
+      button.addEventListener("click", () => adjustMenuSetCount(button.dataset.setCountPlus, 1));
+    });
+    document.getElementById("save-baseline-set-counts").addEventListener("click", saveBaselineSetCountsFromMenu);
     const continueButton = document.getElementById("continue-session");
     if (continueButton) {
       continueButton.addEventListener("click", () => {
@@ -1346,6 +1364,7 @@
     const memoSession = currentMemoSession();
     const memoText = memoSession?.coachMemo || "";
     const baselineList = renderBaselineWeightsSettings();
+    const baselineSetCountList = renderBaselineSetCountsSettings();
     const coachUpdateControls = renderCoachUpdateImport();
     const memoControls = memoSession
       ? `
@@ -1387,6 +1406,10 @@
           <section class="settings-section">
             <h3>次回基準重量</h3>
             ${baselineList}
+          </section>
+          <section class="settings-section">
+            <h3>基準セット数</h3>
+            ${baselineSetCountList}
           </section>
           <section class="settings-section">
             <h3>コーチメモ</h3>
@@ -1435,6 +1458,39 @@
         </div>
       `;
     }).join("");
+
+    return `<div class="baseline-list">${rows}</div>`;
+  }
+
+  function renderBaselineSetCountsSettings() {
+    const baselineSetCounts = loadBaselineSetCounts();
+    const entries = Object.entries(baselineSetCounts)
+      .map(([key, value]) => {
+        const [courseId, exerciseId] = key.split(":");
+        const course = COURSE_PLANS[courseId];
+        const exercise = EXERCISES[exerciseId];
+        const count = Number(value);
+        if (!course || !exercise || !Number.isFinite(count)) {
+          return null;
+        }
+        return { key, course, exercise, count: clampSetCount(count, exercise) };
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        const courseCompare = left.course.name.localeCompare(right.course.name, "ja");
+        return courseCompare || left.exercise.name.localeCompare(right.exercise.name, "ja");
+      });
+
+    if (!entries.length) {
+      return '<p class="helper-text">保存済みの基準セット数はありません。</p>';
+    }
+
+    const rows = entries.map((entry) => `
+      <div class="baseline-row">
+        <span>${entry.course.name} / ${entry.exercise.name}: ${entry.count}セット</span>
+        <button class="button ghost mini-button" type="button" data-delete-baseline-sets="${entry.key}">削除</button>
+      </div>
+    `).join("");
 
     return `<div class="baseline-list">${rows}</div>`;
   }
@@ -1617,6 +1673,10 @@
 
     document.querySelectorAll("[data-delete-baseline]").forEach((button) => {
       button.addEventListener("click", () => deleteBaselineWeight(button.dataset.deleteBaseline));
+    });
+
+    document.querySelectorAll("[data-delete-baseline-sets]").forEach((button) => {
+      button.addEventListener("click", () => deleteBaselineSetCount(button.dataset.deleteBaselineSets));
     });
 
     wireCoachMemoPanel(currentMemoSession());
@@ -1883,6 +1943,7 @@
       activeSession: loadActiveSession(),
       lastCourse: window.localStorage.getItem(STORAGE_LAST_COURSE_KEY),
       baselineWeights: loadBaselineWeights(),
+      baselineSetCounts: loadBaselineSetCounts(),
       storage: morningGymStorageSnapshot(),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -2111,6 +2172,9 @@
     }
     if (payload.baselineWeights && typeof payload.baselineWeights === "object") {
       window.localStorage.setItem(STORAGE_BASELINE_WEIGHTS_KEY, JSON.stringify(payload.baselineWeights));
+    }
+    if (payload.baselineSetCounts && typeof payload.baselineSetCounts === "object") {
+      window.localStorage.setItem(STORAGE_BASELINE_SET_COUNTS_KEY, JSON.stringify(payload.baselineSetCounts));
     }
   }
 
@@ -2710,6 +2774,22 @@
     `;
   }
 
+  function renderPlannedSetCountEditor(planned, exercise) {
+    const minSets = 1;
+    const maxSets = maxSetsForExercise(exercise);
+    return `
+      <div class="set-count-editor">
+        <span>予定セット数</span>
+        <div class="stepper" aria-label="${exercise.name}の予定セット数">
+          <button class="button ghost mini-button" type="button" data-set-count-minus="${exercise.id}" ${planned.sets <= minSets ? "disabled" : ""}>-</button>
+          <strong>${planned.sets}セット</strong>
+          <button class="button ghost mini-button" type="button" data-set-count-plus="${exercise.id}" ${planned.sets >= maxSets ? "disabled" : ""}>+</button>
+        </div>
+        <small>最大${maxSets}セット</small>
+      </div>
+    `;
+  }
+
   function updateMenuPlannedWeight(exerciseId, value) {
     const nextWeight = Number(value);
     if (!Number.isFinite(nextWeight) || nextWeight <= 0) {
@@ -2721,10 +2801,35 @@
     }
   }
 
+  function adjustMenuSetCount(exerciseId, delta) {
+    const planned = plannedById(exerciseId, state.menuPlannedExercises);
+    const exercise = EXERCISES[exerciseId];
+    if (!planned || !exercise) {
+      return;
+    }
+    updatePlannedSetCount(planned, exercise, planned.sets + delta);
+    renderMenu();
+  }
+
+  function updatePlannedSetCount(planned, exercise, setCount) {
+    const nextSetCount = clampSetCount(setCount, exercise);
+    planned.sets = nextSetCount;
+    planned.targetRir = targetRirPlanFor(planned, exercise, nextSetCount);
+    return planned;
+  }
+
+  function estimateMenuDurationMinutes(plannedExercises) {
+    const totalSeconds = plannedExercises.reduce((total, planned) => {
+      const sets = Number(planned.sets) || 0;
+      return total + sets * (45 + Number(planned.restSeconds || 0));
+    }, plannedExercises.length * 120);
+    return Math.max(1, Math.round(totalSeconds / 60));
+  }
+
   function resetWorkingMenu() {
     const course = currentCoursePlan();
     state.menuOrder = defaultOrder();
-    state.menuPlannedExercises = applyBaselineWeights(clone(course.plannedExercises));
+    state.menuPlannedExercises = applyMenuBaselines(clone(course.plannedExercises), course.courseId);
     state.menuReorderMode = false;
   }
 
@@ -2949,8 +3054,33 @@
     }
   }
 
+  function loadBaselineSetCounts() {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_BASELINE_SET_COUNTS_KEY);
+      const baselineSetCounts = raw ? JSON.parse(raw) : {};
+      return baselineSetCounts && typeof baselineSetCounts === "object" && !Array.isArray(baselineSetCounts)
+        ? baselineSetCounts
+        : {};
+    } catch (error) {
+      console.warn("Could not load baseline set counts", error);
+      return {};
+    }
+  }
+
   function saveBaselineWeights(baselineWeights) {
     window.localStorage.setItem(STORAGE_BASELINE_WEIGHTS_KEY, JSON.stringify(baselineWeights));
+  }
+
+  function saveBaselineSetCounts(baselineSetCounts) {
+    window.localStorage.setItem(STORAGE_BASELINE_SET_COUNTS_KEY, JSON.stringify(baselineSetCounts));
+  }
+
+  function baselineSetCountKey(courseId, exerciseId) {
+    return `${courseId}:${exerciseId}`;
+  }
+
+  function applyMenuBaselines(plannedExercises, courseId = currentCoursePlan().courseId) {
+    return applyBaselineSetCounts(applyBaselineWeights(plannedExercises), courseId);
   }
 
   function applyBaselineWeights(plannedExercises) {
@@ -2967,6 +3097,21 @@
     });
   }
 
+  function applyBaselineSetCounts(plannedExercises, courseId = currentCoursePlan().courseId) {
+    const baselineSetCounts = loadBaselineSetCounts();
+    return plannedExercises.map((planned) => {
+      const exercise = EXERCISES[planned.exerciseId];
+      if (!exercise) {
+        return planned;
+      }
+      const storedSetCount = Number(baselineSetCounts[baselineSetCountKey(courseId, planned.exerciseId)]);
+      if (!Number.isFinite(storedSetCount)) {
+        return updatePlannedSetCount({ ...planned }, exercise, planned.sets);
+      }
+      return updatePlannedSetCount({ ...planned }, exercise, storedSetCount);
+    });
+  }
+
   function saveBaselineWeight(exerciseId, weight) {
     if (!EXERCISES[exerciseId] || !Number.isFinite(weight) || weight <= 0) {
       return;
@@ -2976,6 +3121,33 @@
     saveBaselineWeights(baselineWeights);
     state.summaryMessage = "次回基準重量を保存しました";
     state.settingsMessage = "次回基準重量を保存しました";
+    render();
+  }
+
+  function saveBaselineSetCountsFromMenu() {
+    if (!window.confirm("現在のセット数を次回以降の基準にします。よろしいですか？")) {
+      return;
+    }
+    const course = currentCoursePlan();
+    const baselineSetCounts = loadBaselineSetCounts();
+    state.menuPlannedExercises.forEach((planned) => {
+      const exercise = EXERCISES[planned.exerciseId];
+      if (!exercise) {
+        return;
+      }
+      baselineSetCounts[baselineSetCountKey(course.courseId, planned.exerciseId)] = clampSetCount(planned.sets, exercise);
+    });
+    saveBaselineSetCounts(baselineSetCounts);
+    state.settingsMessage = "基準セット数を保存しました";
+    render();
+  }
+
+  function deleteBaselineSetCount(key) {
+    const baselineSetCounts = loadBaselineSetCounts();
+    delete baselineSetCounts[key];
+    saveBaselineSetCounts(baselineSetCounts);
+    state.settingsMessage = "基準セット数を削除しました";
+    resetWorkingMenu();
     render();
   }
 
@@ -3301,6 +3473,53 @@
     return planned.allOutAllowed
       && setNumber >= planned.sets
       && isLastUnfinishedExercise(planned.exerciseId);
+  }
+
+  function maxSetsForExercise(exercise) {
+    if (exercise.id === "deadlift") {
+      return 3;
+    }
+    if (exercise.type === "heavy_compound") {
+      return 4;
+    }
+    return 5;
+  }
+
+  function clampSetCount(setCount, exercise) {
+    const count = Number.parseInt(setCount, 10);
+    const safeCount = Number.isInteger(count) ? count : 1;
+    return Math.min(maxSetsForExercise(exercise), Math.max(1, safeCount));
+  }
+
+  function targetRirPlanFor(planned, exercise, setCount) {
+    const count = clampSetCount(setCount, exercise);
+    if (planned.allOutAllowed) {
+      const allOutPlans = {
+        1: [0],
+        2: [1, 0],
+        3: [2, 1, 0],
+        4: [2, 1, 1, 0],
+        5: [3, 2, 1, 1, 0],
+      };
+      return allOutPlans[count] || allOutPlans[5];
+    }
+    if (exercise.type === "heavy_compound") {
+      const heavyPlans = {
+        1: [2],
+        2: [3, 2],
+        3: [3, 2, 1],
+        4: [3, 2, 1, 1],
+      };
+      return heavyPlans[count] || heavyPlans[4];
+    }
+    const nonHeavyPlans = {
+      1: [2],
+      2: [2, 1],
+      3: [2, 1, 1],
+      4: [3, 2, 1, 1],
+      5: [3, 2, 2, 1, 1],
+    };
+    return nonHeavyPlans[count] || nonHeavyPlans[5];
   }
 
   function targetRirFor(planned, setNumber) {

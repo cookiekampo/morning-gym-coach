@@ -557,10 +557,48 @@ h3 {
   text-align: left;
 }
 
+.history-row span {
+  display: grid;
+  gap: 3px;
+}
+
+.history-row em {
+  color: var(--text);
+  font-style: normal;
+}
+
 .history-row small {
   color: var(--muted);
   font-size: 0.78rem;
-  white-space: nowrap;
+}
+
+.session-meta-card {
+  display: grid;
+  gap: 10px;
+}
+
+.session-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.session-meta-grid div {
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--field);
+}
+
+.session-meta-grid dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.session-meta-grid dd {
+  margin: 2px 0 0;
+  font-weight: 900;
 }
 
 .baseline-row {

@@ -6,7 +6,7 @@
   const STORAGE_LAST_COURSE_KEY = "morning-gym-coach:v0.5:lastCourse";
   const STORAGE_BASELINE_WEIGHTS_KEY = "morning-gym-coach:v0.8:baselineWeights";
   const STORAGE_BASELINE_SET_COUNTS_KEY = "morning-gym-coach:vNext:baselineSetCounts";
-  const APP_VERSION = "v0.10";
+  const APP_VERSION = "vNext";
   const DEFAULT_COURSE_ID = "legs_45_v0.5";
   const RIR_ZERO_WARNING = "この種目でRIR0は非推奨です。フォームが崩れていない場合のみ記録してください。";
   const LEG_EXTENSION_ALLOUT_WARNING = "まだ後続種目があります。ここでオールアウトすると後の種目に影響します。記録しますか？";
@@ -531,6 +531,7 @@
     const activeSession = loadActiveSession();
     const latestSession = getLatestSession();
     const course = currentCoursePlan();
+    const coursePreviousText = previousCourseText(course.courseId);
     if (!state.menuOrder.length) {
       state.menuOrder = defaultOrder();
     }
@@ -559,6 +560,7 @@
           ${renderPlannedWeightEditor(planned, exercise)}
           ${renderPlannedSetCountEditor(planned, exercise)}
           <p class="helper-text">${menuSafetyText(planned, exercise)}</p>
+          <p class="helper-text">${exercise.name}: ${previousExerciseText(exercise.id)}</p>
           ${state.menuReorderMode ? `
             <div class="reorder-actions">
               <button class="button ghost" type="button" data-move-up="${exercise.id}" ${index === 0 ? "disabled" : ""}>上へ</button>
@@ -576,6 +578,7 @@
           <div>
             <p class="eyebrow">今日のメニュー</p>
             <h1>${courseLabel(course)}</h1>
+            <p class="helper-text">${courseLabel(course)}: ${coursePreviousText}</p>
           </div>
         </header>
         <div class="estimate-card">
@@ -915,12 +918,13 @@
       return `
         <section class="mini-panel previous-record">
           <h3>前回</h3>
-          <p class="helper-text">前回記録なし</p>
+          <p class="helper-text">前回なし</p>
         </section>
       `;
     }
 
     const exercise = EXERCISES[exerciseId];
+    const previousText = previousSessionText(previous.session, state.session);
     const rows = previous.sets.map((set) => {
       if (set.painFlag) {
         return "<li>痛みあり</li>";
@@ -931,6 +935,7 @@
     return `
       <section class="mini-panel previous-record">
         <h3>前回</h3>
+        <p class="helper-text">${exercise.name}: ${previousText}</p>
         <ul class="compact-list">${rows}</ul>
       </section>
     `;
@@ -939,11 +944,14 @@
   function findPreviousExerciseRecord(exerciseId) {
     const currentId = state.session?.id;
     const sessions = loadSessions()
+      .map(normalizeLoadedSession)
       .filter((session) => session.id !== currentId)
-      .sort((left, right) => new Date(left.startedAt || 0) - new Date(right.startedAt || 0));
+      .filter((session) => session.status !== "active")
+      .filter((session) => isBeforeReferenceSession(session, state.session))
+      .sort(sortBySessionStart);
 
     for (let index = sessions.length - 1; index >= 0; index -= 1) {
-      const session = normalizeLoadedSession(sessions[index]);
+      const session = sessions[index];
       const sets = session.performedSets.filter((set) => set.exerciseId === exerciseId && !set.isWarmup);
       if (sets.length) {
         return { session, sets };
@@ -1077,6 +1085,7 @@
 
     const session = state.session;
     normalizeLoadedSession(session);
+    const sessionMeta = renderSessionMetaSummary(session);
     const orderSummary = renderOrderSummary(session);
     const cards = session.plannedSession.plannedExercises.map((planned) => {
       const exercise = EXERCISES[planned.exerciseId];
@@ -1124,10 +1133,11 @@
         ${renderAppHeader()}
         <header class="screen-header">
           <div>
-            <p class="eyebrow">${formatDateTime(session.startedAt)}</p>
+            <p class="eyebrow">${sessionDateLabel(session)}</p>
             <h1>トレ後まとめ</h1>
           </div>
         </header>
+        ${sessionMeta}
         ${orderSummary}
         ${renderLogTools(session)}
         ${renderCoachMemoSummary(session)}
@@ -1274,11 +1284,15 @@
   function renderHistory() {
     const sessions = loadSessions()
       .map(normalizeLoadedSession)
-      .sort((left, right) => new Date(right.startedAt || 0) - new Date(left.startedAt || 0));
+      .sort((left, right) => sortBySessionStart(right, left));
     const rows = sessions.length
       ? sessions.map((session) => `
         <button class="history-row" type="button" data-history-session="${session.id}">
-          <span>${sessionDate(session)} ${courseLabelForSession(session)}</span>
+          <span>
+            <strong>${sessionDateLabel(session)} ${sessionStartTimeLabel(session)}</strong>
+            <em>${courseLabelForSession(session)}</em>
+            <small>所要時間: ${sessionDurationLabel(session)}</small>
+          </span>
           <small>${session.status === "active" ? "進行中" : "まとめ"}</small>
         </button>
       `).join("")
@@ -2458,6 +2472,10 @@
     }
 
     session.exerciseStatuses[planned.exerciseId] = "deferred";
+    session.deferredExercises = session.deferredExercises || [];
+    if (!session.deferredExercises.includes(planned.exerciseId)) {
+      session.deferredExercises.push(planned.exerciseId);
+    }
     const currentIndex = session.activeOrder.indexOf(planned.exerciseId);
     if (currentIndex >= 0) {
       session.activeOrder.splice(currentIndex, 1);
@@ -2697,6 +2715,7 @@
 
   function createSession(order = defaultOrder()) {
     const now = new Date();
+    const startedAt = now.toISOString();
     const course = currentCoursePlan();
     const plannedOrder = defaultOrder();
     const activeOrder = order.length ? [...order] : [...plannedOrder];
@@ -2709,14 +2728,19 @@
       courseId: course.courseId,
       course_id: course.courseId,
       status: "active",
-      startedAt: now.toISOString(),
+      startedAt,
+      finishedAt: null,
       endedAt: null,
+      durationMinutes: null,
+      localDate: dateKey(now),
+      weekday: weekdayLabel(now),
       allOutBanned: false,
       currentExerciseIndex: 0,
       currentSetNumber: 1,
       plannedOrder,
       activeOrder,
       actualOrder: [],
+      deferredExercises: [],
       exerciseStatuses: createExerciseStatuses(plannedOrder),
       plannedSession: {
         id: course.id,
@@ -2739,7 +2763,13 @@
       return;
     }
     state.session.status = "complete";
-    state.session.endedAt = new Date().toISOString();
+    const finishedAt = new Date();
+    state.session.finishedAt = finishedAt.toISOString();
+    state.session.endedAt = state.session.finishedAt;
+    state.session.durationMinutes = calculateDurationMinutes(state.session.startedAt, state.session.finishedAt);
+    const startDate = parseDateOrNull(state.session.startedAt) || finishedAt;
+    state.session.localDate = state.session.localDate || dateKey(startDate);
+    state.session.weekday = state.session.weekday || weekdayLabel(startDate);
     markSessionAtEnd();
     saveSession(state.session);
     setView("summary");
@@ -3087,19 +3117,56 @@
   }
 
   function renderOrderSummary(session) {
-    if (sameOrder(session.plannedOrder, session.actualOrder)) {
-      return "";
-    }
-
     const planned = formatOrder(session.plannedOrder);
-    const actual = session.actualOrder.length ? formatOrder(session.actualOrder) : "記録なし";
+    const actualOrder = effectiveActualOrder(session);
+    const actual = actualOrder.length ? formatOrder(actualOrder) : "記録なし";
+    const notes = orderChangeNotes(session, actualOrder);
     return `
       <section class="summary-card order-summary">
-        <h2>実施順</h2>
+        <h2>予定順と実施順</h2>
         <p class="muted">予定順: ${planned}</p>
         <p class="muted">実施順: ${actual}</p>
+        ${notes ? `<p class="summary-note">${notes}</p>` : ""}
       </section>
     `;
+  }
+
+  function renderSessionMetaSummary(session) {
+    return `
+      <section class="summary-card session-meta-card">
+        <h2>セッション</h2>
+        <dl class="session-meta-grid">
+          <div><dt>日付</dt><dd>${sessionDateLabel(session)}</dd></div>
+          <div><dt>時間</dt><dd>${sessionTimeRangeLabel(session)}</dd></div>
+          <div><dt>所要時間</dt><dd>${sessionDurationLabel(session)}</dd></div>
+          <div><dt>メニュー</dt><dd>${courseLabelForSession(session)}</dd></div>
+          <div><dt>前回同コース</dt><dd>${previousCourseText(sessionCourseId(session), session)}</dd></div>
+        </dl>
+      </section>
+    `;
+  }
+
+  function orderChangeNotes(session, actualOrder = effectiveActualOrder(session)) {
+    const notes = [];
+    if (!sameOrder(session.plannedOrder, actualOrder)) {
+      notes.push("予定順と実施順が違います");
+    }
+    const skipped = Object.entries(session.exerciseStatuses || {})
+      .filter(([, status]) => status === "skipped")
+      .map(([exerciseId]) => EXERCISES[exerciseId]?.name || exerciseId);
+    if (skipped.length) {
+      notes.push(`スキップ: ${skipped.join("、")}`);
+    }
+    const deferred = [...new Set([
+      ...(session.deferredExercises || []),
+      ...Object.entries(session.exerciseStatuses || {})
+        .filter(([, status]) => status === "deferred")
+        .map(([exerciseId]) => exerciseId),
+    ])].map((exerciseId) => EXERCISES[exerciseId]?.name || exerciseId);
+    if (deferred.length) {
+      notes.push(`後回し: ${deferred.join("、")}`);
+    }
+    return notes.join(" / ");
   }
 
   function formatOrder(order) {
@@ -3111,6 +3178,110 @@
       return false;
     }
     return left.every((exerciseId, index) => exerciseId === right[index]);
+  }
+
+  function effectiveActualOrder(session) {
+    return session.actualOrder?.length ? session.actualOrder : inferActualOrderFromSets(session);
+  }
+
+  function inferActualOrderFromSets(session) {
+    const order = [];
+    (session.performedSets || []).forEach((set) => {
+      if (set.exerciseId && !order.includes(set.exerciseId)) {
+        order.push(set.exerciseId);
+      }
+    });
+    return order;
+  }
+
+  function sortBySessionStart(left, right) {
+    return sessionSortTime(left) - sessionSortTime(right);
+  }
+
+  function sessionSortTime(session) {
+    const parsed = parseDateOrNull(session?.startedAt);
+    if (parsed) {
+      return parsed.getTime();
+    }
+    const local = session?.localDate || session?.plannedSession?.date;
+    return local ? dateFromLocalDate(local).getTime() : 0;
+  }
+
+  function findPreviousCourseSession(courseId, referenceSession = null) {
+    const currentId = referenceSession?.id || null;
+    const sessions = loadSessions()
+      .map(normalizeLoadedSession)
+      .filter((session) => session.id !== currentId)
+      .filter((session) => session.status !== "active")
+      .filter((session) => sessionCourseId(session) === courseId)
+      .filter((session) => isBeforeReferenceSession(session, referenceSession))
+      .sort(sortBySessionStart);
+    return sessions[sessions.length - 1] || null;
+  }
+
+  function findPreviousExerciseSession(exerciseId, referenceSession = null) {
+    const currentId = referenceSession?.id || null;
+    const sessions = loadSessions()
+      .map(normalizeLoadedSession)
+      .filter((session) => session.id !== currentId)
+      .filter((session) => session.status !== "active")
+      .filter((session) => isBeforeReferenceSession(session, referenceSession))
+      .filter((session) => session.performedSets.some((set) => set.exerciseId === exerciseId && !set.isWarmup))
+      .sort(sortBySessionStart);
+    return sessions[sessions.length - 1] || null;
+  }
+
+  function isBeforeReferenceSession(session, referenceSession = null) {
+    if (!referenceSession) {
+      return true;
+    }
+    return sessionSortTime(session) < sessionSortTime(referenceSession);
+  }
+
+  function previousCourseText(courseId, referenceSession = null) {
+    return previousSessionText(findPreviousCourseSession(courseId, referenceSession), referenceSession);
+  }
+
+  function previousExerciseText(exerciseId, referenceSession = null) {
+    return previousSessionText(findPreviousExerciseSession(exerciseId, referenceSession), referenceSession);
+  }
+
+  function previousSessionText(previousSession, referenceSession = null) {
+    if (!previousSession) {
+      return "前回なし";
+    }
+    const days = daysSinceSession(previousSession, referenceSession);
+    return Number.isFinite(days) ? `前回から${days}日` : "前回あり";
+  }
+
+  function previousCourseMarkdownText(session) {
+    const previousSession = findPreviousCourseSession(sessionCourseId(session), session);
+    if (!previousSession) {
+      return "前回なし";
+    }
+    const days = daysSinceSession(previousSession, session);
+    return Number.isFinite(days) ? `${days}日前` : "前回あり";
+  }
+
+  function daysSinceSession(previousSession, referenceSession = null) {
+    const previousDate = sessionLocalDateKey(previousSession);
+    const referenceDate = referenceSession ? sessionLocalDateKey(referenceSession) : todayKey();
+    if (!previousDate || !referenceDate) {
+      return NaN;
+    }
+    const diff = dateFromLocalDate(referenceDate).getTime() - dateFromLocalDate(previousDate).getTime();
+    return Math.max(0, Math.round(diff / 86400000));
+  }
+
+  function sessionLocalDateKey(session) {
+    if (session?.localDate) {
+      return session.localDate;
+    }
+    if (session?.plannedSession?.date) {
+      return session.plannedSession.date;
+    }
+    const parsed = parseDateOrNull(session?.startedAt);
+    return parsed ? dateKey(parsed) : "";
   }
 
   function ensureDraft(planned) {
@@ -3377,9 +3548,22 @@
       session.plannedSession.courseId = session.plannedSession.courseId || courseId;
       session.plannedSession.course_id = session.plannedSession.course_id || courseId;
     }
+    session.startedAt = inferSessionStartedAt(session);
+    session.finishedAt = inferSessionFinishedAt(session);
+    if (session.finishedAt && !session.endedAt) {
+      session.endedAt = session.finishedAt;
+    }
+    const sessionStartDate = parseDateOrNull(session.startedAt);
+    session.localDate = session.localDate || session.plannedSession?.date || (sessionStartDate ? dateKey(sessionStartDate) : "");
+    session.weekday = session.weekday || (session.localDate ? weekdayLabel(dateFromLocalDate(session.localDate)) : sessionStartDate ? weekdayLabel(sessionStartDate) : "");
+    const calculatedDuration = calculateDurationMinutes(session.startedAt, session.finishedAt || session.endedAt);
+    session.durationMinutes = Number.isFinite(Number(session.durationMinutes))
+      ? Number(session.durationMinutes)
+      : calculatedDuration;
     session.plannedOrder = plannedOrder;
     session.activeOrder = session.activeOrder || [...plannedOrder];
     session.actualOrder = session.actualOrder || [];
+    session.deferredExercises = session.deferredExercises || [];
     session.exerciseStatuses = {
       ...createExerciseStatuses(plannedOrder),
       ...(session.exerciseStatuses || {}),
@@ -3391,6 +3575,9 @@
       actualRestSeconds: set.actualRestSeconds ?? null,
       ...set,
     }));
+    if (!session.actualOrder.length) {
+      session.actualOrder = inferActualOrderFromSets(session);
+    }
     session.coachMemo = session.coachMemo || "";
     session.allOutBanned = Boolean(session.allOutBanned);
     return session;
@@ -3470,17 +3657,25 @@
 
   function buildMarkdownLog(session) {
     normalizeLoadedSession(session);
+    const actualOrder = effectiveActualOrder(session);
     const lines = [
       "# Morning Gym Coach Log",
       "",
-      `日付: ${sessionDate(session)}`,
+      `日付: ${sessionLocalDateKey(session) || "不明"}`,
+      `曜日: ${session.weekday || "不明"}`,
+      `開始: ${formatTime(session.startedAt)}`,
+      `終了: ${formatTime(session.finishedAt || session.endedAt)}`,
+      `所要時間: ${sessionDurationLabel(session)}`,
       `メニュー: ${session.plannedSession.name} / ${session.plannedSession.durationMinutes}分`,
+      `前回同コース: ${previousCourseMarkdownText(session)}`,
       "",
       "## 予定順",
       formatOrder(session.plannedOrder),
       "",
       "## 実施順",
-      session.actualOrder.length ? formatOrder(session.actualOrder) : "記録なし",
+      actualOrder.length ? formatOrder(actualOrder) : "記録なし",
+      "",
+      "## 種目ログ",
       "",
     ];
 
@@ -3520,7 +3715,8 @@
     }
     lines.push("");
     lines.push("## ChatGPTへの依頼");
-    lines.push("次回の重量、種目順、オールアウト種目、必要なら推定1RMを見てください。");
+    lines.push("次回の重量、RIR目標、種目順、オールアウト方針を見てください。");
+    lines.push("前回からの日数、実施順、実際の休憩時間も考慮してください。");
     lines.push("次回方針を出してください。最後に、アプリ反映用の coach_update JSON をコードブロックで出してください。");
     return lines.join("\n");
   }
@@ -3557,6 +3753,8 @@
     const skippedExercises = Object.entries(session.exerciseStatuses || {})
       .filter(([, status]) => status === "skipped")
       .map(([exerciseId]) => EXERCISES[exerciseId]?.name || exerciseId);
+    const deferredExercises = [...new Set(session.deferredExercises || [])]
+      .map((exerciseId) => EXERCISES[exerciseId]?.name || exerciseId);
     const painExercises = [...new Set(session.performedSets
       .filter((set) => set.painFlag)
       .map((set) => EXERCISES[set.exerciseId]?.name || set.exerciseId))];
@@ -3579,6 +3777,9 @@
     if (skippedExercises.length) {
       notes.push(`スキップ: ${skippedExercises.join("、")}`);
     }
+    if (deferredExercises.length) {
+      notes.push(`後回し: ${deferredExercises.join("、")}`);
+    }
     if (painExercises.length) {
       notes.push(`痛みあり: ${painExercises.join("、")}`);
     }
@@ -3588,7 +3789,7 @@
     if (allOutRirZero.length) {
       notes.push(`オールアウト記録: ${allOutRirZero.join("、")}`);
     }
-    if (!sameOrder(session.plannedOrder, session.actualOrder)) {
+    if (!sameOrder(session.plannedOrder, effectiveActualOrder(session))) {
       notes.push("予定順と実施順が違います");
     }
     return notes;
@@ -3835,6 +4036,83 @@
     return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
   }
 
+  function parseDateOrNull(value) {
+    if (!value) {
+      return null;
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function toIsoOrNull(value) {
+    const date = parseDateOrNull(value);
+    return date ? date.toISOString() : null;
+  }
+
+  function inferSessionStartedAt(session) {
+    const direct = toIsoOrNull(session?.startedAt || session?.createdAt);
+    if (direct) {
+      return direct;
+    }
+    const id = String(session?.id || "");
+    if (id.startsWith("session-")) {
+      return toIsoOrNull(id.replace(/^session-/, ""));
+    }
+    return null;
+  }
+
+  function inferSessionFinishedAt(session) {
+    return toIsoOrNull(session?.finishedAt || session?.endedAt || session?.completedAt);
+  }
+
+  function calculateDurationMinutes(startedAt, finishedAt) {
+    const started = parseDateOrNull(startedAt);
+    const finished = parseDateOrNull(finishedAt);
+    if (!started || !finished || finished < started) {
+      return null;
+    }
+    return Math.max(1, Math.round((finished.getTime() - started.getTime()) / 60000));
+  }
+
+  function dateFromLocalDate(localDate) {
+    return new Date(`${localDate}T00:00:00`);
+  }
+
+  function weekdayLabel(date) {
+    const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+    return weekdays[date.getDay()] || "";
+  }
+
+  function formatTime(value) {
+    const date = parseDateOrNull(value);
+    if (!date) {
+      return "不明";
+    }
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }
+
+  function sessionDateLabel(session) {
+    const localDate = sessionLocalDateKey(session);
+    if (!localDate) {
+      return "不明";
+    }
+    const weekday = session.weekday || weekdayLabel(dateFromLocalDate(localDate));
+    return `${localDate} ${weekday}`;
+  }
+
+  function sessionStartTimeLabel(session) {
+    return formatTime(session.startedAt);
+  }
+
+  function sessionTimeRangeLabel(session) {
+    return `${formatTime(session.startedAt)}〜${formatTime(session.finishedAt || session.endedAt)}`;
+  }
+
+  function sessionDurationLabel(session) {
+    const duration = Number(session.durationMinutes);
+    return Number.isFinite(duration) && duration > 0 ? `${duration}分` : "不明";
+  }
+
   function dateKey(date) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   }
@@ -3844,6 +4122,9 @@
   }
 
   function sessionDate(session) {
+    if (session?.localDate) {
+      return session.localDate;
+    }
     if (session?.plannedSession?.date) {
       return session.plannedSession.date;
     }

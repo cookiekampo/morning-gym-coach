@@ -208,6 +208,7 @@
     "legs_45_v0.5": {
       courseId: "legs_45_v0.5",
       id: "legs_45_v0.5",
+      courseGroup: "legs",
       name: "脚",
       durationMinutes: 45,
       plannedExercises: [
@@ -246,6 +247,7 @@
     "chest_45_v0.5": {
       courseId: "chest_45_v0.5",
       id: "chest_45_v0.5",
+      courseGroup: "chest",
       name: "胸",
       durationMinutes: 45,
       plannedExercises: [
@@ -294,6 +296,7 @@
     "back_45_v0.7": {
       courseId: "back_45_v0.7",
       id: "back_45_v0.7",
+      courseGroup: "back",
       name: "背中",
       durationMinutes: 45,
       plannedExercises: [
@@ -342,6 +345,7 @@
     "shoulder_45_v0.10": {
       courseId: "shoulder_45_v0.10",
       id: "shoulder_45_v0.10",
+      courseGroup: "shoulder",
       name: "肩",
       durationMinutes: 45,
       plannedExercises: [
@@ -390,6 +394,7 @@
     "arms_45_v0.10": {
       courseId: "arms_45_v0.10",
       id: "arms_45_v0.10",
+      courseGroup: "arms",
       name: "腕",
       durationMinutes: 45,
       plannedExercises: [
@@ -531,7 +536,7 @@
     const activeSession = loadActiveSession();
     const latestSession = getLatestSession();
     const course = currentCoursePlan();
-    const coursePreviousText = previousCourseText(course.courseId);
+    const coursePreviousText = courseLastWorkoutText(course);
     if (!state.menuOrder.length) {
       state.menuOrder = defaultOrder();
     }
@@ -578,7 +583,7 @@
           <div>
             <p class="eyebrow">今日のメニュー</p>
             <h1>${courseLabel(course)}</h1>
-            <p class="helper-text">${courseLabel(course)}: ${coursePreviousText}</p>
+            <p class="helper-text">前回: ${coursePreviousText}</p>
           </div>
         </header>
         <div class="estimate-card">
@@ -1527,10 +1532,24 @@
     const selectedCourseId = displayCourseId();
     const buttons = Object.values(COURSE_PLANS).map((course) => {
       const selected = course.courseId === selectedCourseId;
+      const previous = courseLastWorkoutDetails(course);
+      const previousText = previous
+        ? `${previous.shortDate}・${previous.relativeText}`
+        : "前回なし";
+      const durationText = previous?.durationText ? `<small>前回所要: ${previous.durationText}</small>` : "";
+      const badge = previous ? courseRecommendationLabel(previous.days) : "未実施";
+      const badgeHtml = badge ? `<em>${badge}</em>` : "";
       return `
-        <button class="sheet-list-button${selected ? " selected" : ""}" type="button" data-panel-course-id="${course.courseId}">
-          <span>${courseLabel(course)}</span>
-          ${selected ? "<strong>選択中</strong>" : ""}
+        <button class="sheet-list-button course-card-button${selected ? " selected" : ""}" type="button" data-panel-course-id="${course.courseId}">
+          <span class="course-card-main">
+            <strong>${courseLabel(course)}</strong>
+            <small>前回: ${previousText}</small>
+            ${durationText}
+          </span>
+          <span class="course-card-side">
+            ${badgeHtml}
+            ${selected ? "<strong>選択中</strong>" : ""}
+          </span>
         </button>
       `;
     }).join("");
@@ -2727,6 +2746,7 @@
       id: `session-${now.toISOString()}`,
       courseId: course.courseId,
       course_id: course.courseId,
+      courseGroup: course.courseGroup,
       status: "active",
       startedAt,
       finishedAt: null,
@@ -2746,6 +2766,7 @@
         id: course.id,
         courseId: course.courseId,
         course_id: course.courseId,
+        courseGroup: course.courseGroup,
         date: dateKey(now),
         name: course.name,
         durationMinutes: course.durationMinutes,
@@ -3198,6 +3219,10 @@
     return sessionSortTime(left) - sessionSortTime(right);
   }
 
+  function sortBySessionOccurrence(left, right) {
+    return sessionOccurrenceTime(left) - sessionOccurrenceTime(right);
+  }
+
   function sessionSortTime(session) {
     const parsed = parseDateOrNull(session?.startedAt);
     if (parsed) {
@@ -3207,15 +3232,24 @@
     return local ? dateFromLocalDate(local).getTime() : 0;
   }
 
+  function sessionOccurrenceTime(session) {
+    const finished = parseDateOrNull(session?.finishedAt || session?.endedAt);
+    if (finished) {
+      return finished.getTime();
+    }
+    return sessionSortTime(session);
+  }
+
   function findPreviousCourseSession(courseId, referenceSession = null) {
     const currentId = referenceSession?.id || null;
+    const courseGroup = courseGroupForCourseId(courseId);
     const sessions = loadSessions()
       .map(normalizeLoadedSession)
       .filter((session) => session.id !== currentId)
       .filter((session) => session.status !== "active")
-      .filter((session) => sessionCourseId(session) === courseId)
+      .filter((session) => sessionCourseGroup(session) === courseGroup)
       .filter((session) => isBeforeReferenceSession(session, referenceSession))
-      .sort(sortBySessionStart);
+      .sort(sortBySessionOccurrence);
     return sessions[sessions.length - 1] || null;
   }
 
@@ -3227,7 +3261,7 @@
       .filter((session) => session.status !== "active")
       .filter((session) => isBeforeReferenceSession(session, referenceSession))
       .filter((session) => session.performedSets.some((set) => set.exerciseId === exerciseId && !set.isWarmup))
-      .sort(sortBySessionStart);
+      .sort(sortBySessionOccurrence);
     return sessions[sessions.length - 1] || null;
   }
 
@@ -3239,7 +3273,7 @@
   }
 
   function previousCourseText(courseId, referenceSession = null) {
-    return previousSessionText(findPreviousCourseSession(courseId, referenceSession), referenceSession);
+    return courseLastWorkoutText(coursePlanById(courseId), referenceSession);
   }
 
   function previousExerciseText(exerciseId, referenceSession = null) {
@@ -3255,12 +3289,72 @@
   }
 
   function previousCourseMarkdownText(session) {
-    const previousSession = findPreviousCourseSession(sessionCourseId(session), session);
-    if (!previousSession) {
+    return courseLastWorkoutText(coursePlanById(sessionCourseId(session)), session);
+  }
+
+  function courseLastWorkoutText(course, referenceSession = null) {
+    const details = courseLastWorkoutDetails(course, referenceSession);
+    if (!details) {
       return "前回なし";
     }
-    const days = daysSinceSession(previousSession, session);
-    return Number.isFinite(days) ? `${days}日前` : "前回あり";
+    return `${details.shortDate}・${details.relativeText}${details.durationText ? `・所要${details.durationText}` : ""}`;
+  }
+
+  function courseLastWorkoutDetails(course, referenceSession = null) {
+    if (!course) {
+      return null;
+    }
+    const previousSession = findPreviousCourseSession(course.courseId, referenceSession);
+    if (!previousSession) {
+      return null;
+    }
+    const localDate = sessionLocalDateKey(previousSession);
+    const days = daysSinceSession(previousSession, referenceSession);
+    return {
+      session: previousSession,
+      shortDate: localDate ? formatShortLocalDate(localDate, previousSession.weekday) : "不明",
+      relativeText: relativeDaysText(days),
+      durationText: Number.isFinite(Number(previousSession.durationMinutes)) ? `${Number(previousSession.durationMinutes)}分` : "",
+      days,
+    };
+  }
+
+  function courseRecommendationLabel(days) {
+    if (!Number.isFinite(days)) {
+      return "不明";
+    }
+    if (days >= 5) {
+      return "そろそろ";
+    }
+    if (days <= 1) {
+      return "直近実施";
+    }
+    return "";
+  }
+
+  function formatShortLocalDate(localDate, weekday = "") {
+    if (!localDate) {
+      return "不明";
+    }
+    const date = dateFromLocalDate(localDate);
+    if (Number.isNaN(date.getTime())) {
+      return "不明";
+    }
+    const day = weekday || weekdayLabel(date);
+    return `${date.getMonth() + 1}/${date.getDate()} ${day}`;
+  }
+
+  function relativeDaysText(days) {
+    if (!Number.isFinite(days) || days < 0) {
+      return "不明";
+    }
+    if (days === 0) {
+      return "今日";
+    }
+    if (days === 1) {
+      return "昨日";
+    }
+    return `${days}日前`;
   }
 
   function daysSinceSession(previousSession, referenceSession = null) {
@@ -3270,7 +3364,8 @@
       return NaN;
     }
     const diff = dateFromLocalDate(referenceDate).getTime() - dateFromLocalDate(previousDate).getTime();
-    return Math.max(0, Math.round(diff / 86400000));
+    const days = Math.round(diff / 86400000);
+    return days < 0 ? NaN : days;
   }
 
   function sessionLocalDateKey(session) {
@@ -3544,9 +3639,11 @@
     const plannedOrder = session.plannedOrder || session.plannedSession?.plannedExercises?.map((planned) => planned.exerciseId) || defaultOrder();
     session.courseId = courseId;
     session.course_id = courseId;
+    session.courseGroup = sessionCourseGroup(session);
     if (session.plannedSession) {
       session.plannedSession.courseId = session.plannedSession.courseId || courseId;
       session.plannedSession.course_id = session.plannedSession.course_id || courseId;
+      session.plannedSession.courseGroup = session.plannedSession.courseGroup || session.courseGroup;
     }
     session.startedAt = inferSessionStartedAt(session);
     session.finishedAt = inferSessionFinishedAt(session);
@@ -3616,6 +3713,56 @@
       return "chest_45_v0.5";
     }
     return DEFAULT_COURSE_ID;
+  }
+
+  function sessionCourseGroup(session) {
+    const explicit = session?.courseGroup || session?.plannedSession?.courseGroup;
+    if (explicit) {
+      return explicit;
+    }
+    return inferCourseGroup(sessionCourseId(session), session?.plannedSession?.name, session?.plannedSession?.plannedExercises || []);
+  }
+
+  function courseGroupForCourseId(courseId) {
+    const course = COURSE_PLANS[courseId];
+    return course?.courseGroup || inferCourseGroup(courseId);
+  }
+
+  function inferCourseGroup(courseId = "", courseName = "", plannedExercises = []) {
+    const id = String(courseId);
+    const name = String(courseName);
+    if (id.includes("legs") || name.includes("脚")) {
+      return "legs";
+    }
+    if (id.includes("chest") || name.includes("胸")) {
+      return "chest";
+    }
+    if (id.includes("back") || name.includes("背中")) {
+      return "back";
+    }
+    if (id.includes("shoulder") || name.includes("肩")) {
+      return "shoulder";
+    }
+    if (id.includes("arms") || name.includes("腕")) {
+      return "arms";
+    }
+    const exerciseIds = plannedExercises.map((planned) => planned.exerciseId);
+    if (exerciseIds.some((exerciseId) => ["squat", "bulgarian_split_squat", "leg_extension"].includes(exerciseId))) {
+      return "legs";
+    }
+    if (exerciseIds.some((exerciseId) => ["bench_press", "incline_dumbbell_fly", "dumbbell_fly", "pectoral_fly"].includes(exerciseId))) {
+      return "chest";
+    }
+    if (exerciseIds.some((exerciseId) => ["deadlift", "lat_pulldown", "seated_row", "machine_row"].includes(exerciseId))) {
+      return "back";
+    }
+    if (exerciseIds.some((exerciseId) => ["smith_shoulder_press", "side_raise", "machine_shoulder_press", "face_pull"].includes(exerciseId))) {
+      return "shoulder";
+    }
+    if (exerciseIds.some((exerciseId) => ["ez_bar_curl", "french_press", "incline_dumbbell_curl", "cable_pressdown"].includes(exerciseId))) {
+      return "arms";
+    }
+    return "legs";
   }
 
   function loadLastCourseId() {

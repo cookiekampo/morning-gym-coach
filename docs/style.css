@@ -771,6 +771,39 @@ h3 {
   white-space: nowrap;
 }
 
+.course-card-button {
+  align-items: stretch;
+}
+
+.course-card-main {
+  display: grid;
+  gap: 4px;
+}
+
+.course-card-main small {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.course-card-side {
+  display: grid;
+  align-content: center;
+  justify-items: end;
+  gap: 4px;
+  min-width: 66px;
+}
+
+.course-card-side em {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
 .settings-section {
   display: grid;
   gap: 8px;

@@ -10,6 +10,7 @@
   const DEFAULT_COURSE_ID = "legs_45_v0.5";
   const RIR_ZERO_WARNING = "この種目でRIR0は非推奨です。フォームが崩れていない場合のみ記録してください。";
   const LEG_EXTENSION_ALLOUT_WARNING = "まだ後続種目があります。ここでオールアウトすると後の種目に影響します。記録しますか？";
+  const SAME_EXERCISE_ALLOUT_WARNING = "まだこの種目の予定セットが残っています。ここでRIR0にすると後続セットに影響します。記録しますか？";
 
   const EXERCISES = {
     squat: {
@@ -978,6 +979,10 @@
     }
 
     const nextLines = renderTransitionLines(info);
+    const timerLabel = restTimerLabel(info);
+    const interExerciseRestLine = !state.restFinished && isInterExerciseTransition(info)
+      ? `<p class="helper-text">休憩 ${state.timerTotal}秒</p>`
+      : "";
     const extraButton = info.canAddExtra
       ? '<button class="button ghost" id="add-extra-set" type="button">この種目をもう1セット追加</button>'
       : "";
@@ -989,9 +994,10 @@
       <section class="screen timer-screen">
         ${renderAppHeader()}
         <div>
-          <p class="timer-label">${state.restFinished ? "休憩終了" : `休憩 ${state.timerTotal}秒`}</p>
+          <p class="timer-label">${state.restFinished ? "休憩終了" : timerLabel}</p>
           <div class="timer-count ${state.restFinished ? "rest-ended" : ""}">${state.timerRemaining}</div>
           ${state.restFinished ? '<p class="notice-pill">休憩終了</p>' : ""}
+          ${interExerciseRestLine}
           <div class="next-lines">${nextLines}</div>
         </div>
         <div class="timer-actions">
@@ -1037,6 +1043,14 @@
       endExerciseButtonNode.addEventListener("click", endExerciseFromRest);
     }
     wireGlobalControls();
+  }
+
+  function isInterExerciseTransition(info) {
+    return info?.kind === "nextExercise" || info?.kind === "deferred";
+  }
+
+  function restTimerLabel(info) {
+    return isInterExerciseTransition(info) ? "種目間休憩" : `休憩 ${state.timerTotal}秒`;
   }
 
   function renderNext() {
@@ -1915,6 +1929,8 @@
     }
 
     const rir = state.selectedRir;
+    const finalSetOfExercise = isFinalSetOfExercise(planned, session.currentSetNumber);
+    const finalSetOfFinalExercise = isFinalSetOfFinalExercise(planned, session.currentSetNumber);
     if (rir === "0" && session.allOutBanned) {
       window.alert("痛みあり後はRIR0を記録できません。");
       return;
@@ -1924,12 +1940,11 @@
       return;
     }
 
-    if (rir === "0" && planned.allOutAllowed && session.currentSetNumber < planned.sets) {
-      window.alert("RIR0は最終セットのみ記録できます。");
+    if (rir === "0" && planned.allOutAllowed && !finalSetOfExercise && !window.confirm(SAME_EXERCISE_ALLOUT_WARNING)) {
       return;
     }
 
-    if (rir === "0" && planned.allOutAllowed && !canUseAllOutAsPlanned(planned, session.currentSetNumber) && !window.confirm(LEG_EXTENSION_ALLOUT_WARNING)) {
+    if (rir === "0" && planned.allOutAllowed && finalSetOfExercise && !finalSetOfFinalExercise && !window.confirm(LEG_EXTENSION_ALLOUT_WARNING)) {
       return;
     }
 
@@ -1966,6 +1981,11 @@
     }
 
     saveSession(session);
+    if (finalSetOfFinalExercise) {
+      clearRestTimerState();
+      setView("next");
+      return;
+    }
     startRest(performedSet.plannedRestSeconds, setIndex);
   }
 
@@ -2553,6 +2573,17 @@
     startTimerInterval();
   }
 
+  function clearRestTimerState() {
+    stopTimer();
+    state.timerTotal = 0;
+    state.timerPlannedSeconds = 0;
+    state.timerRemaining = 0;
+    state.timerStartedAt = null;
+    state.timerSetIndex = null;
+    state.restFinished = false;
+    state.restNotified = false;
+  }
+
   function startTimerInterval() {
     stopTimer();
     state.timerId = window.setInterval(() => {
@@ -2906,7 +2937,7 @@
 
     return {
       kind: "complete",
-      title: "予定完了",
+      title: "すべて完了",
       eyebrow: `${completedExercise.name} 完了`,
       primaryLabel: "トレーニング終了・まとめへ",
       planned: completedPlanned,
@@ -2920,7 +2951,7 @@
   function renderTransitionLines(info) {
     if (info.kind === "complete") {
       return `
-        <p>予定セット完了。</p>
+        <p>すべての種目が完了しました。</p>
         <p>まとめを確認。</p>
         <p>${info.endRecommended ? "この種目は終了推奨。" : "追加も選べます。"}</p>
       `;
@@ -3099,6 +3130,18 @@
       const status = state.session.exerciseStatuses[nextExerciseId] || "pending";
       return status !== "completed" && status !== "skipped";
     });
+  }
+
+  function isFinalSetOfExercise(planned, setNumber) {
+    return Number(setNumber) >= Number(planned.sets);
+  }
+
+  function isFinalExerciseInSession(exerciseId) {
+    return !hasFollowingUnfinishedExercise(exerciseId);
+  }
+
+  function isFinalSetOfFinalExercise(planned, setNumber) {
+    return isFinalSetOfExercise(planned, setNumber) && isFinalExerciseInSession(planned.exerciseId);
   }
 
   function isLastUnfinishedExercise(exerciseId) {
@@ -3998,8 +4041,7 @@
       return false;
     }
     return planned.restPauseAllowed
-      && setNumber >= planned.sets
-      && isLastUnfinishedExercise(planned.exerciseId);
+      && isFinalSetOfFinalExercise(planned, setNumber);
   }
 
   function canUseAllOutAsPlanned(planned, setNumber) {
@@ -4007,8 +4049,7 @@
       return false;
     }
     return planned.allOutAllowed
-      && setNumber >= planned.sets
-      && isLastUnfinishedExercise(planned.exerciseId);
+      && isFinalSetOfFinalExercise(planned, setNumber);
   }
 
   function maxSetsForExercise(exercise) {
